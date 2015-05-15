@@ -3,7 +3,7 @@
 
 #include <stdint.h>
 
-void la_init_ecran();
+int la_init_ecran();
 
 void la_lcdHome();
 void la_lcdClear();

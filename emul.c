@@ -27,7 +27,7 @@ WINDOW *create_newwin(int height, int width, int starty, int startx)
 }
 
 
-void la_init_ecran(){
+int la_init_ecran(){
 	initscr();
 	cbreak();
 	keypad(stdscr, TRUE);
@@ -44,6 +44,7 @@ void la_init_ecran(){
 	win = create_newwin(4, 18, 6, 0);
 	//mvwprintw(win, 1,1, "HELLO");
 	wrefresh(win);
+	return 0;
 }
 
 void la_exit(){
@@ -109,7 +110,7 @@ void la_wait_input(){
 }
 
 int
-la_control_input_one()
+la_control_input_one(int)
 {
 	int in;
 	in = _la_control_input_one();

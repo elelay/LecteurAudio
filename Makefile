@@ -2,7 +2,7 @@ ARCH:=$(strip $(shell uname -m))
 ifeq ($(ARCH),armv6l)
 RPI:=TRUE
 INC:=-DRPI
-LINK:=-lwiringPi
+LINK:=-lwiringPi -lwiringPiDev
 else
 INC:=
 LINK:=-lncurses
@@ -19,6 +19,8 @@ all: $(ALL)
 
 ifeq ($(strip $(RPI)),)
 la: emul.o
+else
+la: lcd.o magneto_arduino.o
 endif
 
 la: main.o

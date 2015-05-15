@@ -504,7 +504,7 @@ static void wait_input_async(struct mpd_connection* conn, int mpd_fd, int* contr
 			}
 			else
 			{
-				if(la_control_input_one())
+				if(la_control_input_one(events[n].data.fd))
 				{
 					return;
 				}

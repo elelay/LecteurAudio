@@ -10,6 +10,6 @@ typedef int (*Callback)(Control control, void* param);
 int la_init_controls(int** fdControls, int* fdControlCount);
 void la_on_key(Control, Callback fn, void* param);
 void la_wait_input();
-int la_control_input_one();
+int la_control_input_one(int fd);
 
 #endif        //  #ifndef CONTROLES_H
