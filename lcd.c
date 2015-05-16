@@ -34,7 +34,7 @@ int la_init_ecran()
   		fprintf(stderr, "E: iconv init failed: %s\n", strerror(errno));
   	}
 
-	lcdHandle = lcdInit (2, 16, 4, 11,10, 4,5,6,7,0,0,0,0) ;
+	lcdHandle = lcdInit (2, 16, 4, 26, 27, 4,5,6,7,0,0,0,0) ;
 	if (lcdHandle < 0)
 	{
 		fprintf(stderr, "E: lcdInit failed\n");
