@@ -23,7 +23,7 @@ else
 la: lcd.o magneto_arduino.o
 endif
 
-la: main.o
+la: main.o controles.o
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $(filter-out main.o,$(filter-out %.h,$^)) main.o
 
 main.o: controles.h ecran.h

@@ -53,8 +53,11 @@ LaState state;
 int state_menu;
 
 char** list_contents = NULL;
+bool* list_is_dir = NULL;
 int list_length;
 int state_list;
+char* state_list_path;
+int state_list_rl_offset;
 
 int state_settings;
 
@@ -72,16 +75,6 @@ static char log_buffer[16];
 	snprintf(log_buffer,16, x, __VA_ARGS__);\
 	la_lcdPosition(0,0);\
 	la_lcdPuts(log_buffer);\
-}
-
-#define START_TEST(description, method, ...) \
-{\
-	printf("[Start Test] " description "\n");\
-	if (method(__VA_ARGS__) < 0)\
-		printf("%c[%d;%d;%dm[End Test: ERROR]\n", COLOR_CODE, BRIGHT, RED, BG_BLACK);\
-	else\
-		printf("%c[%d;%d;%dm[End Test: OK]\n", COLOR_CODE, BRIGHT, GREEN, BG_BLACK);\
-	printf("%c[%dm", 0x1B, 0);\
 }
 
 #define CHECK_CONNECTION(conn) \
@@ -182,20 +175,60 @@ print_status(struct mpd_connection *conn)
 	struct mpd_status *status;
 	struct mpd_song *song;
 	char *value;
+	char* tmp;
 
 	la_lcdClear();
 
 	song = mpd_run_current_song(conn);
 	if (song != NULL) {
 
-		if((value = (char*)mpd_song_get_tag(song, MPD_TAG_TITLE, 0)) != NULL){
-			la_lcdPosition(0,0);
-			la_lcdPuts(value);
+		if((value = (char*)mpd_song_get_tag(song, MPD_TAG_TITLE, 0)) == NULL)
+		{
+			if((value = (char*)mpd_song_get_uri(song)) == NULL)
+			{
+				value = "<NO URI>";
+			}
+			else
+			{
+				tmp = strrchr(value, '/');
+				if(tmp != NULL)
+				{
+					value = tmp+1;
+				}
+			}
 		}
-		if((value = (char*)mpd_song_get_tag(song, MPD_TAG_ARTIST, 0)) != NULL){
-			la_lcdPosition(0,1);
-			la_lcdPuts(value);
+		
+		la_lcdPosition(0,0);
+		la_lcdPuts(value);
+		
+		if((value = (char*)mpd_song_get_tag(song, MPD_TAG_ARTIST, 0)) == NULL)
+		{
+			if((value = (char*)mpd_song_get_uri(song)) == NULL)
+			{
+				value = "<NO URI>";
+			}
+			else
+			{
+				tmp = strrchr(value, '/');
+				if(tmp == NULL)
+				{
+					value = "<NO DIR>";
+				}
+				else
+				{
+					*tmp='\0';
+					tmp = strrchr(value, '/');
+					if(tmp != NULL)
+					{
+						value = tmp+1;
+					}
+				}
+			}
 		}
+		
+		la_lcdPosition(0,1);
+		la_lcdPuts(value);
+
 
 		mpd_song_free(song);
 	}
@@ -228,118 +261,6 @@ print_status(struct mpd_connection *conn)
 	return 0;
 }
 
-// static int
-// test_currentsong(struct mpd_connection *conn)
-// {
-// 	struct mpd_song *song;
-
-// 	song = mpd_run_current_song(conn);
-// 	if (song != NULL) {
-// 		print_song(song);
-
-// 		mpd_song_free(song);
-// 	}
-
-// 	mpd_response_finish(conn);
-// 	CHECK_CONNECTION(conn);
-
-// 	return 0;
-// }
-
-
-// static int
-// test_list_status_currentsong(struct mpd_connection *conn)
-// {
-// 	struct mpd_status *status;
-// 	const struct mpd_song *song;
-// 	struct mpd_entity *entity;
-
-// 	mpd_command_list_begin(conn, true);
-// 	mpd_send_status(conn);
-// 	mpd_send_current_song(conn);
-// 	mpd_command_list_end(conn);
-
-// 	CHECK_CONNECTION(conn);
-
-// 	status = mpd_recv_status(conn);
-// 	if (!status) {
-// 		LOG_ERROR("%s", mpd_connection_get_error_message(conn));
-// 		return -1;
-// 	}
-// 	if (mpd_status_get_error(status)) {
-// 		LOG_WARNING("status error: %s", mpd_status_get_error(status));
-// 	}
-
-// 	print_status(status);
-// 	mpd_status_free(status);
-
-// 	mpd_response_next(conn);
-
-// 	entity = mpd_recv_entity(conn);
-// 	if (entity) {
-// 		if (mpd_entity_get_type(entity) != MPD_ENTITY_TYPE_SONG) {
-// 			LOG_ERROR("entity doesn't have the expected type (song)i :%d",
-// 				  mpd_entity_get_type(entity));
-// 			mpd_entity_free(entity);
-// 			return -1;
-// 		}
-
-// 		song = mpd_entity_get_song(entity);
-
-// 		print_song(song);
-
-// 		mpd_entity_free(entity);
-// 	}
-
-// 	mpd_response_finish(conn);
-// 	CHECK_CONNECTION(conn);
-
-// 	return 0;
-// }
-
-// static int
-// test_lsinfo(struct mpd_connection *conn, const char *path)
-// {
-// 	struct mpd_entity *entity;
-
-// 	mpd_send_list_meta(conn, path);
-// 	CHECK_CONNECTION(conn);
-
-// 	while ((entity = mpd_recv_entity(conn)) != NULL) {
-// 		const struct mpd_song *song;
-// 		const struct mpd_directory *dir;
-// 		const struct mpd_playlist *pl;
-
-// 		switch (mpd_entity_get_type(entity)) {
-// 		case MPD_ENTITY_TYPE_UNKNOWN:
-// 			printf("Unknown type\n");
-// 			break;
-
-// 		case MPD_ENTITY_TYPE_SONG:
-// 			song = mpd_entity_get_song(entity);
-// 			print_song (song);
-// 			break;
-
-// 		case MPD_ENTITY_TYPE_DIRECTORY:
-// 			dir = mpd_entity_get_directory(entity);
-// 			printf("directory: %s\n", mpd_directory_get_path(dir));
-// 			break;
-
-// 		case MPD_ENTITY_TYPE_PLAYLIST:
-// 			pl = mpd_entity_get_playlist(entity);
-// 			LOG_INFO("playlist: %s", mpd_playlist_get_path(pl));
-// 			break;
-// 		}
-
-// 		mpd_entity_free(entity);
-// 	}
-
-// 	mpd_response_finish(conn);
-// 	CHECK_CONNECTION(conn);
-
-// 	return 0;
-// }
-
 typedef struct StringList {
 	char* value;
 	struct StringList* next;
@@ -358,7 +279,7 @@ mk_string_list()
 }
 
 static int
-fetch_and_print_list(struct mpd_connection *conn)
+fetch_and_print_list_artists(struct mpd_connection *conn)
 {
 	struct mpd_pair *pair;
 	StringList *buf, *tmp, *cur;
@@ -417,6 +338,145 @@ fetch_and_print_list(struct mpd_connection *conn)
 	list_length = tmp_len;
 	
 	state_list = 0;
+	state_list_rl_offset = 0;
+	print_list();
+	
+	return 0;
+}
+
+static char*
+la_mpd_song_get_filename(const struct mpd_song* song)
+{
+	char* value;
+	char* tmp;
+	if((value = (char*)mpd_song_get_tag(song, MPD_TAG_TITLE, 0)) == NULL)
+	{
+		if((value = (char*)mpd_song_get_uri(song)) == NULL)
+		{
+			value = "<NO URI>";
+		}
+		else
+		{
+			tmp = strrchr(value, '/');
+			if(tmp != NULL)
+			{
+				value = tmp+1;
+			}
+		}
+	}
+	return strdup(value);
+}
+
+static int
+fetch_and_print_list(struct mpd_connection *conn, char* path)
+{
+	StringList *buf, *tmp, *cur;
+	char** tmpl;
+	int tmp_len,tmp_list_len;
+	struct mpd_entity* entity;
+	const struct mpd_directory* dir;
+	const struct mpd_song* song;
+	char* value;
+	
+	tmp_len = 0;
+	cur = NULL;
+	
+ 	CHECK_CONNECTION(conn);
+ 	mpd_run_noidle(conn);
+
+ 	if(path == NULL)
+ 	{
+ 		mpd_send_list_meta(conn, "/");
+ 	}
+ 	else
+ 	{
+ 		printf("D: fetch_and_print_list(%s)\n", path);
+ 		mpd_send_list_meta(conn, path);
+ 	}
+
+	CHECK_CONNECTION(conn);
+
+	tmp_len = 0;
+	while((entity = mpd_recv_entity(conn)) != NULL)
+	{
+		if(path == NULL)
+		{
+			if(mpd_entity_get_type(entity)  ==  MPD_ENTITY_TYPE_DIRECTORY)
+			{
+				dir = mpd_entity_get_directory(entity);
+				value = strdup(mpd_directory_get_path(dir));
+				if (cur == NULL)
+				{
+					buf = tmp = mk_string_list();
+					tmp->value = value;
+				}
+				else
+				{
+					tmp = mk_string_list();
+					tmp->value = value;
+					cur->next = tmp;
+				}
+				cur = tmp;
+				tmp_len++;
+			}
+		}
+		else
+		{
+			if(mpd_entity_get_type(entity)  ==  MPD_ENTITY_TYPE_SONG)
+			{
+				song = mpd_entity_get_song(entity);
+				value = la_mpd_song_get_filename(song);
+				if (cur == NULL)
+				{
+					buf = tmp = mk_string_list();
+					tmp->value = value;
+				}
+				else
+				{
+					tmp = mk_string_list();
+					tmp->value = value;
+					cur->next = tmp;
+				}
+				cur = tmp;
+				tmp_len++;
+			}
+		}
+		
+		mpd_entity_free(entity);
+	}
+	
+	mpd_response_finish(conn);
+	CHECK_CONNECTION(conn);
+
+	if(!mpd_send_idle(conn))
+	{
+		LOG_ERROR("Unable to put mpd in idle mode%s\n","");
+		return -1;
+	}
+
+	tmp_list_len = list_length;
+	list_length = 0;
+	for(tmpl = list_contents; tmp_list_len != 0; tmpl++)
+	{
+		free(*tmpl);
+		tmp_list_len--;
+	}
+	free(list_contents);
+	
+	list_contents = calloc(tmp_len, sizeof(char*));
+	cur = buf;
+	for(tmpl = list_contents; cur != NULL; tmpl++)
+	{
+		*tmpl = cur->value;
+		tmp = cur;
+		cur = cur->next;
+		free(tmp);
+	}
+	list_length = tmp_len;
+	
+	state_list = 0;
+	state_list_rl_offset = 0;
+	state_list_path = path;
 	print_list();
 	
 	return 0;
@@ -555,9 +615,9 @@ print_list()
 {
 	la_lcdClear();
 	la_lcdHome();
-	la_lcdPutChar('0'+state_list);
+	la_lcdPutChar('>');
 	la_lcdPosition(2, 0);
-	la_lcdPuts(list_contents[state_list]);
+	la_lcdPuts(list_contents[state_list]+state_list_rl_offset);
 	la_lcdPosition(2, 1);
 	la_lcdPuts(list_contents[(state_list+1)%list_length]);
 }
@@ -568,6 +628,19 @@ print_settings()
 	LOG_ERROR("E: %s", "print_settings");
 }
 
+static int do_list_directory(struct mpd_connection* conn)
+{
+	state_list_path = strdup(list_contents[state_list]);
+	if(state_list_path == NULL)
+	{
+		LOG_ERROR("%s", "Out of memory");
+		return -1;
+	}
+	else
+	{
+		return fetch_and_print_list(conn, state_list_path);
+	}
+}
 
 static int
 do_menu(Control ctrl, struct mpd_connection* conn)
@@ -586,6 +659,17 @@ do_menu(Control ctrl, struct mpd_connection* conn)
 			return -1;
 		}
 		break;
+	case LA_STATE_LIST:
+		if(state_list_path == NULL)
+		{
+			state = LA_STATE_MENU;
+			state_menu = 0;
+			print_menu();
+		}
+		else
+		{
+			return fetch_and_print_list(conn, NULL);
+		}
 	default:
 		state = LA_STATE_MENU;
 		state_menu = 0;
@@ -654,6 +738,68 @@ do_down(Control ctrl, struct mpd_connection* conn)
 }
 
 static int
+do_left(Control ctrl, struct mpd_connection* conn)
+{
+	size_t len;
+	switch(state)
+	{
+	case LA_STATE_LIST:
+		len = strlen(list_contents[state_list]);
+		if(state_list_rl_offset > 14)
+		{
+			state_list_rl_offset -= 10;
+		}
+		else if(state_list_rl_offset > 0)
+		{
+			state_list_rl_offset--;
+		}
+		else
+		{
+			state_list_rl_offset = strlen(list_contents[state_list]) - 16;
+			if(state_list_rl_offset < 0){
+				state_list_rl_offset = 0;
+			}
+		}
+
+		print_list();
+		break;
+	default:
+		return 0;
+	}
+	return 0;
+}
+
+static int
+do_right(Control ctrl, struct mpd_connection* conn)
+{
+	size_t len;
+
+	switch(state)
+	{
+	case LA_STATE_LIST:
+		len = strlen(list_contents[state_list]);
+		if(state_list_rl_offset < len - 28)
+		{
+			state_list_rl_offset += 10;
+		}
+		else if(state_list_rl_offset < len - 14)
+		{
+			state_list_rl_offset++;
+		}
+		else
+		{
+			state_list_rl_offset = 0;
+		}
+
+		print_list();
+		break;
+	default:
+		return 0;
+	}
+	return 0;
+}
+
+static int
 do_ok(Control ctrl, struct mpd_connection* conn)
 {
 	switch(state)
@@ -663,7 +809,7 @@ do_ok(Control ctrl, struct mpd_connection* conn)
 		{
 		case 0:
 			state = LA_STATE_LIST;
-			return fetch_and_print_list(conn);
+			return fetch_and_print_list(conn, NULL);
 		case 1:
 			state  = LA_STATE_VOLUME;
 			return fetch_and_print_volume(conn);
@@ -678,7 +824,14 @@ do_ok(Control ctrl, struct mpd_connection* conn)
 		}
 		break;
 	case LA_STATE_LIST:
-		return do_replace_playing_with_selected(conn);
+		if(state_list_path == NULL)
+		{
+			return do_list_directory(conn);
+		}
+		else
+		{
+			return do_replace_playing_with_selected(conn);
+		}
 	default:
 		return -1;
 	}
@@ -724,6 +877,8 @@ main(int argc, char ** argv)
 	la_on_key(LA_MENU, (Callback)do_menu, conn);
 	la_on_key(LA_UP, (Callback)do_up, conn);
 	la_on_key(LA_DOWN, (Callback)do_down, conn);
+	la_on_key(LA_LEFT, (Callback)do_left, conn);
+	la_on_key(LA_RIGHT, (Callback)do_right, conn);
 	la_on_key(LA_OK, (Callback)do_ok, conn);
 	
 	

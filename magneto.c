@@ -21,14 +21,6 @@ static int PINS_2[4] = {26, 27, 28, 29};
 
 static int debounceTime[2] = {0};
 
-static char* DEBUG_CODES[LA_CONTROL_LENGTH] = {
-	"LA_PLAYPAUSE",
-	"LA_UP",
-	"LA_DOWN",
-	"LA_MENU",
-	"LA_OK"
-};
-
 static void handlePins(int i)
 {
 	if (millis () < debounceTime[i])

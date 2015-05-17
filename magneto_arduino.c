@@ -28,7 +28,7 @@ typedef enum {
 	CODE_PLAY,
 	CODE_DOWN,
 	CODE_REW,
-	
+
 	CODE__2,
 	CODE_STOP,
 	CODE_REC,
@@ -44,7 +44,7 @@ static char* DEBUG_CODES[CODE_LENGTH] = {
 	"PLAY",
 	"DOWN",
 	"REW",
-	
+
 	"_2",
 	"STOP",
 	"REC",
@@ -52,18 +52,10 @@ static char* DEBUG_CODES[CODE_LENGTH] = {
 	"FF",
 };
 
-static char* DEBUG_CMDES[LA_CONTROL_LENGTH] = {
-	"LA_PLAYPAUSE",
-	"LA_UP",
-	"LA_DOWN",
-	"LA_MENU",
-	"LA_OK"
-};
-
 int la_init_controls(int** fdControls, int* fdControlCount)
 {
 	int ret;
-	
+
 	ret = wiringPiSetup();
 	if(ret) return ret;
 
@@ -72,8 +64,11 @@ int la_init_controls(int** fdControls, int* fdControlCount)
     	fprintf (stderr, "E: Unable to open serial device: %s\n", strerror (errno)) ;
     	return -1;
     }
+
+    serialFlush(fdsArduino[0]);
+
     fArduino = fdopen(fdsArduino[0], "r");
-    
+
     buf_len = 8;
     buf = malloc(buf_len);
     if(!buf)
@@ -81,7 +76,7 @@ int la_init_controls(int** fdControls, int* fdControlCount)
     	fprintf (stderr, "E: Unable to allocate buffer: %s\n", strerror (errno)) ;
     	return -1;
     }
-    
+
 	*fdControls = fdsArduino;
 	*fdControlCount = 1;
 	return 0;
@@ -107,7 +102,7 @@ int la_control_input_one(int fd)
 	int val;
 	Control c;
 	int len;
-	
+
 
 	len = getline(&buf, &buf_len, fArduino);
 	if(len == 0)
@@ -117,9 +112,9 @@ int la_control_input_one(int fd)
 	}
 	else if(len != 8){
 		fprintf(stderr, "E: invalid read (%i) from arduino:%s\n", len, buf);
-		return -1;
+		return 0;
 	}
-	
+
 	if(!strstr(buf, "PIN1 "))
 	{
 		val = buf[5] - '0';
@@ -132,32 +127,40 @@ int la_control_input_one(int fd)
 	{
 		fprintf(stderr, "E: invalid line read from arduino: %s\n", buf);
 	}
+
 	if(val < 0 || val > 9)
 	{
 		fprintf(stderr, "E: invalid line read from arduino: %s\n", buf);
+		return 0;
 	}
 	//printf("D: PIN %s\n",DEBUG_CODES[val]);
-	
+
 	switch(val)
 	{
 	case CODE_POWER:
 		c = LA_MENU;
 		break;
-		
+
 	case CODE_PLAY:
 		c = LA_PLAYPAUSE;
 		break;
-		
+
 	case CODE_UP:
-	case CODE_REW:
 		c = LA_UP;
 		break;
-		
+
 	case CODE_DOWN:
-	case CODE_FF:
 		c = LA_DOWN;
 		break;
-		
+
+	case CODE_REW:
+		c = LA_LEFT;
+		break;
+
+	case CODE_FF:
+		c = LA_RIGHT;
+		break;
+
 	case CODE_REC:
 		c = LA_OK;
 		break;
@@ -165,7 +168,7 @@ int la_control_input_one(int fd)
 	default:
 		return 0;
 	}
-	
+
 	if(callbacks[c] != NULL)
 	{
 		return callbacks[c](c, callback_params[c]);

@@ -34,7 +34,7 @@ int la_init_ecran()
   		fprintf(stderr, "E: iconv init failed: %s\n", strerror(errno));
   	}
 
-	lcdHandle = lcdInit (2, 16, 4, 26, 27, 4,5,6,7,0,0,0,0) ;
+	lcdHandle = lcdInit (2, 16, 4, 0, 2, 4,5,6,7,0,0,0,0) ;
 	if (lcdHandle < 0)
 	{
 		fprintf(stderr, "E: lcdInit failed\n");
@@ -89,6 +89,16 @@ static void tr(char* str)
 	{
 		switch(str[i])
 		{
+			case (char)224:
+			case (char)225:
+			case (char)226:
+			case (char)227:
+			case (char)228:
+			case (char)229:
+			case (char)230:
+				str[i] = 'a';
+				break;
+			
 			case (char)231:
 				str[i] = 235;
 				break;
@@ -122,7 +132,7 @@ void la_lcdPuts(char* str)
 		stop = 16 - saved_x;
 		conv_buf[stop] = '\0';
 		tr(conv_buf);
-		//printf("D: %s|%s\n", str, conv_buf);
+		printf("D: %s|%s\n", str, conv_buf);
 		lcdPuts(lcdHandle, conv_buf);
 	}
 }
