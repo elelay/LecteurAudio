@@ -8,10 +8,10 @@ INC:=
 LINK:=-lncurses
 endif
 
-ALL:=la
+ALL:=la leds_on_off
 
 CFLAGS:=-Wall $(INC) -g
-LDFLAGS:=-lmpdclient $(LINK)
+LDFLAGS:=-lmpdclient -lrt $(LINK)
 
 .PHONY: all clean
 
@@ -27,6 +27,9 @@ la: main.o controles.o
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $(filter-out main.o,$(filter-out %.h,$^)) main.o
 
 main.o: controles.h ecran.h
+
+leds_on_off: leds_on_off.o
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $<
 
 clean:
 	rm -f la *.o

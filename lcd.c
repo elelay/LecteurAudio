@@ -136,3 +136,20 @@ void la_lcdPuts(char* str)
 		lcdPuts(lcdHandle, conv_buf);
 	}
 }
+
+int la_leds_off();
+int la_leds_on();
+
+void la_ecran_change_state(bool sleep)
+{
+	if(sleep)
+	{
+		lcdDisplay(lcdHandle, 0);
+		la_leds_off();
+	}
+	else
+	{
+		lcdDisplay(lcdHandle, 1);
+		la_leds_on();
+	}
+}

@@ -24,11 +24,14 @@
 #include <mpd/search.h>
 #include <mpd/tag.h>
 
+#include <errno.h>
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
 #include <stdlib.h>
+#include <signal.h>
 #include <sys/epoll.h>
+#include <time.h>
 
 #include "ecran.h"
 #include "controles.h"
@@ -68,6 +71,14 @@ int state_settings;
 
 static char log_buffer[16];
 
+#define LA_SIG_INACTIVE 123
+timer_t timer_inactive;  
+volatile sig_atomic_t inactive_flag = 0;
+
+#define LA_SIG_SLEEP 124
+timer_t timer_sleep;
+volatile sig_atomic_t sleep_flag = 0;
+
 #define LOG_INFO(x, ...) {printf("    [info]" x "\n", __VA_ARGS__);}
 #define LOG_WARNING(x, ...) \
 {\
@@ -77,6 +88,7 @@ static char log_buffer[16];
 
 #define LOG_ERROR(x, ...) \
 {\
+	fprintf(stderr, x, __VA_ARGS__);\
 	snprintf(log_buffer,16, x, __VA_ARGS__);\
 	la_lcdPosition(0,0);\
 	la_lcdPuts(log_buffer);\
@@ -91,19 +103,29 @@ static char log_buffer[16];
 static int
 connect_to_mpd(struct mpd_connection **conn)
 {
-	*conn = mpd_connection_new(NULL, 0, 30000);
-	if (*conn == NULL) {
-		LOG_ERROR("%s", "Out of memory");
-		return -1;
+	int retry = 3;
+	// pour attendre que le service soit bien démarré
+	while(retry > 0){
+		*conn = mpd_connection_new(NULL, 0, 30000);
+		if (*conn == NULL) {
+			LOG_ERROR("%s", "Out of memory");
+			return -1;
+		}
+	
+		if (mpd_connection_get_error(*conn) == MPD_ERROR_SUCCESS)
+		{
+			return 0;
+		}
+		else
+		{
+			LOG_ERROR("%s", mpd_connection_get_error_message(*conn));
+			mpd_connection_free(*conn);
+			*conn = NULL;
+			sleep(3);
+		}
+		retry--;
 	}
-
-	if (mpd_connection_get_error(*conn) != MPD_ERROR_SUCCESS) {
-		LOG_ERROR("%s", mpd_connection_get_error_message(*conn));
-		mpd_connection_free(*conn);
-		*conn = NULL;
-		return -1;
-	}
-	return 0;
+	return -1;
 }
 
 static int
@@ -611,13 +633,103 @@ jump_forward(struct mpd_connection* conn)
 	return 0;
 }
 
+
+static void
+sigrt_handler(int sig, siginfo_t *si, void *uc)
+{
+   printf("Caught signal %d with value %d\n", sig, si->si_value.sival_int);
+   
+   if(si->si_value.sival_int == LA_SIG_INACTIVE)
+   {
+   	   inactive_flag |= 1;
+   }
+   else
+   {
+   	  sleep_flag |= 1;
+   }
+   //signal(sig, SIG_IGN);
+}
+
+static void
+setup_timers()
+{
+	struct sigevent sevp;
+	struct sigaction sa;
+	sigset_t mask;
+	
+	// signal
+	sa.sa_flags = SA_SIGINFO;
+	sa.sa_sigaction = sigrt_handler;
+	sigemptyset(&sa.sa_mask);
+	if (sigaction(SIGRTMIN, &sa, NULL) == -1)
+	{
+		LOG_ERROR("sigaction: %s", strerror(errno));
+		exit(-1);
+	}
+	
+	// bloqué en temps normal
+	sigemptyset(&mask);
+	sigaddset(&mask, SIGRTMIN);
+	if (sigprocmask(SIG_SETMASK, &mask, NULL) == -1)
+	{
+		LOG_ERROR("sigprocmask: %s", strerror(errno));
+		exit(-1);
+	}
+
+	// timers
+	sevp.sigev_notify = SIGEV_SIGNAL;
+	sevp.sigev_signo = SIGRTMIN;
+
+	sevp.sigev_value.sival_int = LA_SIG_INACTIVE;
+	if(timer_create(CLOCK_MONOTONIC, &sevp, &timer_inactive))
+    {
+    	LOG_ERROR("timer_create_inactive: %s\n", strerror(errno));
+    	exit(-1);
+    }
+
+	sevp.sigev_value.sival_int = LA_SIG_SLEEP;
+	if(timer_create(CLOCK_MONOTONIC, &sevp, &timer_sleep))
+    {
+    	LOG_ERROR("timer_create_sleep: %s\n", strerror(errno));
+    	exit(-1);
+    }
+}
+
+static void reset_timers()
+{
+	struct itimerspec its;
+
+	its.it_value.tv_sec = 10;
+	its.it_value.tv_nsec = 0;
+	its.it_interval.tv_nsec = 0;
+	its.it_interval.tv_sec = 0;
+	
+	if(timer_settime(timer_inactive, 0, &its, NULL))
+	{
+		LOG_ERROR("timer_settime: %s\n", strerror(errno));
+		exit(-1);
+	}
+	
+	its.it_value.tv_sec = 1200;
+	if(timer_settime(timer_sleep, 0, &its, NULL))
+	{
+		LOG_ERROR("timer_settime: %s\n", strerror(errno));
+		exit(-1);
+	}
+}
+
 #define MAX_EVENTS 10
 static void wait_input_async(struct mpd_connection* conn, int mpd_fd, int* control_fds, int control_fds_count)
 {
 	struct epoll_event ev, events[MAX_EVENTS];
 	int nfds, epollfd;
 	int n;
+	sigset_t mask;
 	
+	sigemptyset(&mask);
+
+	setup_timers();
+
 	epollfd = epoll_create1(0);
 	if (epollfd == -1)
 	{
@@ -652,11 +764,13 @@ static void wait_input_async(struct mpd_connection* conn, int mpd_fd, int* contr
 		return;
 	}
 	
+	reset_timers();
+
 	while(true)
 	{
-		nfds = epoll_wait(epollfd, events, MAX_EVENTS, -1);
+		nfds = epoll_pwait(epollfd, events, MAX_EVENTS, -1, &mask);
 		if (nfds == -1) {
-			perror("epoll_wait");
+			perror("epoll_pwait");
 			return;
 		}
 		
@@ -1032,7 +1146,8 @@ do_ok(Control ctrl, struct mpd_connection* conn)
 static int
 do_shutdown()
 {
-	return -1;
+	la_ecran_change_state(true);
+	return 0;
 }
 
 

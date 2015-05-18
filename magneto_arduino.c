@@ -97,6 +97,18 @@ void la_wait_input()
 	exit(-1);
 }
 
+void la_leds_off()
+{
+	serialPutchar (fdsArduino[0], 'J');
+	serialFlush(fdsArduino[0]);
+}
+
+void la_leds_on()
+{
+	serialPutchar (fdsArduino[0], 'N');
+	serialFlush(fdsArduino[0]);
+}
+
 int la_control_input_one(int fd)
 {
 	int val;
@@ -111,8 +123,15 @@ int la_control_input_one(int fd)
 		return -1;
 	}
 	else if(len != 8){
-		fprintf(stderr, "E: invalid read (%i) from arduino:%s\n", len, buf);
-		return 0;
+		if(strstr(buf, "got "))
+		{
+			fprintf(stderr, "E: invalid read (%i) from arduino:%s\n", len, buf);
+			return 0;
+		}
+		else
+		{
+			return 0;
+		}
 	}
 
 	if(!strstr(buf, "PIN1 "))
