@@ -10,7 +10,7 @@ endif
 
 ALL:=la
 
-CFLAGS:=-Wall $(INC)
+CFLAGS:=-Wall $(INC) -g
 LDFLAGS:=-lmpdclient $(LINK)
 
 .PHONY: all clean

@@ -41,23 +41,28 @@
 #define COLOR_CODE 0x1B
 
 typedef enum {
-	LA_STATE_PLAYING, LA_STATE_MENU, LA_STATE_LIST, LA_STATE_VOLUME, LA_STATE_SETTINGS
+	LA_STATE_PLAYING, LA_STATE_MENU, LA_STATE_LIST, LA_STATE_ADD_REPLACE, LA_STATE_VOLUME, LA_STATE_SETTINGS
 } LaState;
 
 static void print_list();
 static void print_settings();
 static int do_shutdown();
+static int print_status(struct mpd_connection *conn);
 
 LaState state;
 
 int state_menu;
 
 char** list_contents = NULL;
+char** list_uris = NULL;
 bool* list_is_dir = NULL;
 int list_length;
 int state_list;
 char* state_list_path;
+int state_list_dir_index;
 int state_list_rl_offset;
+
+int state_add_replace;
 
 int state_settings;
 
@@ -102,18 +107,38 @@ connect_to_mpd(struct mpd_connection **conn)
 }
 
 static int
-do_replace_playing_with_selected(struct mpd_connection* conn)
+do_replace_playing_with_selected(struct mpd_connection* conn, bool replace)
 {
-	const char* file = "";
-	
+	char* file = list_uris[state_list];
+
+	printf("D: switch to %s\n", file);
+
  	CHECK_CONNECTION(conn);
  	mpd_run_noidle(conn);
+ 	
+ 	if(replace)
+ 	{
+ 		if(!mpd_run_clear(conn))
+ 		{
+			LOG_ERROR("%s", mpd_connection_get_error_message(conn));
+			return -1;
+ 		}
+ 	}
 
 	if(!mpd_run_add(conn, file))
 	{
 		LOG_ERROR("%s", mpd_connection_get_error_message(conn));
 		return -1;
 	}
+
+	if(!mpd_run_play(conn))
+	{
+		LOG_ERROR("%s", mpd_connection_get_error_message(conn));
+		return -1;
+	}
+
+	state = LA_STATE_PLAYING;
+	print_status(conn);
 
 	if(!mpd_send_idle(conn))
 	{
@@ -168,6 +193,68 @@ fetch_and_print_volume(struct mpd_connection *conn)
 
 	return 0;
 }
+
+static int
+do_change_volume(struct mpd_connection *conn, int inc, bool set)
+{
+	struct mpd_status *status;
+	int volume;
+
+ 	CHECK_CONNECTION(conn);
+ 	mpd_run_noidle(conn);
+
+ 	if(set)
+ 	{
+		if(!mpd_run_set_volume(conn, inc))
+		{
+			LOG_ERROR("Unable to set volume to %i\n",inc);
+			return -1;
+		}
+	}
+	else
+	{
+		if(!mpd_run_change_volume(conn, inc))
+		{
+			LOG_ERROR("Unable to change volume %i\n",inc);
+			return -1;
+		}
+	}
+	
+ 	status = mpd_run_status(conn);
+	if (!status) {
+		LOG_ERROR("%s", mpd_connection_get_error_message(conn));
+		return -1;
+	}
+
+	volume = mpd_status_get_volume(status);
+	
+	la_lcdClear();
+	la_lcdHome();
+	
+	if(volume == -1)
+	{
+		la_lcdPuts("E: no volume");
+	}
+	else
+	{
+		snprintf(log_buffer,16, "%2i%%", volume);
+		la_lcdPuts(log_buffer);
+	}
+	
+	mpd_status_free(status);
+
+	mpd_response_finish(conn);
+	CHECK_CONNECTION(conn);
+
+	if(!mpd_send_idle(conn))
+	{
+		LOG_ERROR("Unable to put mpd in idle mode%s\n","");
+		return -1;
+	}
+
+	return 0;
+}
+
 
 static int
 print_status(struct mpd_connection *conn)
@@ -370,13 +457,13 @@ la_mpd_song_get_filename(const struct mpd_song* song)
 static int
 fetch_and_print_list(struct mpd_connection *conn, char* path)
 {
-	StringList *buf, *tmp, *cur;
-	char** tmpl;
+	StringList *buf, *tmp, *cur, *fns, *cur_fns, *tmp_fns;
+	char **tmpl, **fns_tmpl;
 	int tmp_len,tmp_list_len;
 	struct mpd_entity* entity;
 	const struct mpd_directory* dir;
 	const struct mpd_song* song;
-	char* value;
+	char *value, *uri;
 	
 	tmp_len = 0;
 	cur = NULL;
@@ -425,19 +512,28 @@ fetch_and_print_list(struct mpd_connection *conn, char* path)
 			if(mpd_entity_get_type(entity)  ==  MPD_ENTITY_TYPE_SONG)
 			{
 				song = mpd_entity_get_song(entity);
+				uri = strdup(mpd_song_get_uri(song));
 				value = la_mpd_song_get_filename(song);
 				if (cur == NULL)
 				{
 					buf = tmp = mk_string_list();
 					tmp->value = value;
+
+					fns = tmp_fns = mk_string_list();
+					tmp_fns->value = uri;
 				}
 				else
 				{
 					tmp = mk_string_list();
 					tmp->value = value;
 					cur->next = tmp;
+
+					tmp_fns = mk_string_list();
+					tmp_fns->value = uri;
+					cur_fns->next = tmp_fns;
 				}
 				cur = tmp;
+				cur_fns = tmp_fns;
 				tmp_len++;
 			}
 		}
@@ -456,12 +552,18 @@ fetch_and_print_list(struct mpd_connection *conn, char* path)
 
 	tmp_list_len = list_length;
 	list_length = 0;
-	for(tmpl = list_contents; tmp_list_len != 0; tmpl++)
+	for(tmpl = list_contents, fns_tmpl = list_uris; tmp_list_len != 0; tmpl++, fns_tmpl++)
 	{
 		free(*tmpl);
+		if(list_uris != NULL)
+		{
+			free(*fns_tmpl);
+		}
 		tmp_list_len--;
 	}
 	free(list_contents);
+	free(list_uris);
+	list_uris = NULL;
 	
 	list_contents = calloc(tmp_len, sizeof(char*));
 	cur = buf;
@@ -474,6 +576,19 @@ fetch_and_print_list(struct mpd_connection *conn, char* path)
 	}
 	list_length = tmp_len;
 	
+	if(path != NULL)
+	{
+		list_uris = calloc(tmp_len, sizeof(char*));
+		cur = fns;
+		for(tmpl = list_uris; cur != NULL; tmpl++)
+		{
+			*tmpl = cur->value;
+			tmp = cur;
+			cur = cur->next;
+			free(tmp);
+		}
+	}
+
 	state_list = 0;
 	state_list_rl_offset = 0;
 	state_list_path = path;
@@ -619,7 +734,29 @@ print_list()
 	la_lcdPosition(2, 0);
 	la_lcdPuts(list_contents[state_list]+state_list_rl_offset);
 	la_lcdPosition(2, 1);
-	la_lcdPuts(list_contents[(state_list+1)%list_length]);
+	if(list_length > 1)
+	{
+		la_lcdPuts(list_contents[(state_list+1)%list_length]);
+	}
+}
+
+
+#define ADD_REPLACE_LENGTH 4
+static char* add_replace_contents[ADD_REPLACE_LENGTH] = {
+	"Replace",
+	"Append",
+};
+
+static void
+print_add_replace()
+{
+	la_lcdClear();
+	la_lcdHome();
+	la_lcdPutChar('>');
+	la_lcdPosition(2, 0);
+	la_lcdPuts(add_replace_contents[state_add_replace]);
+	la_lcdPosition(2, 1);
+	la_lcdPuts(add_replace_contents[(state_add_replace+1)%ADD_REPLACE_LENGTH]);
 }
 
 static void
@@ -638,6 +775,7 @@ static int do_list_directory(struct mpd_connection* conn)
 	}
 	else
 	{
+		state_list_dir_index = state_list;
 		return fetch_and_print_list(conn, state_list_path);
 	}
 }
@@ -668,7 +806,16 @@ do_menu(Control ctrl, struct mpd_connection* conn)
 		}
 		else
 		{
-			return fetch_and_print_list(conn, NULL);
+			if(fetch_and_print_list(conn, NULL) == -1)
+			{
+				return -1;
+			}
+			if(state_list_dir_index < list_length)
+			{
+				state_list = state_list_dir_index;
+				print_list();
+				return 0;
+			}
 		}
 	default:
 		state = LA_STATE_MENU;
@@ -684,6 +831,7 @@ do_up(Control ctrl, struct mpd_connection* conn)
 {
 	switch(state)
 	{
+
 	case LA_STATE_MENU:
 		if(state_menu == 0)
 		{
@@ -695,9 +843,11 @@ do_up(Control ctrl, struct mpd_connection* conn)
 		}
 		print_menu();
 		break;
+
 	case LA_STATE_PLAYING:
 		jump_backward(conn);
 		break;
+
 	case LA_STATE_LIST:
 		if(state_list == 0)
 		{
@@ -709,6 +859,22 @@ do_up(Control ctrl, struct mpd_connection* conn)
 		}
 		print_list();
 		break;
+
+	case LA_STATE_ADD_REPLACE:
+		if(state_add_replace == 0)
+		{
+			state_add_replace = 1;
+		}
+		else
+		{
+			state_add_replace = 0;
+		}
+		print_add_replace();
+		break;
+
+	case LA_STATE_VOLUME:
+		return do_change_volume(conn, 48, true);
+
 	default:
 		return -1;
 	}
@@ -731,6 +897,14 @@ do_down(Control ctrl, struct mpd_connection* conn)
 		state_list = (state_list + 1) % list_length;
 		print_list();
 		break;
+	case LA_STATE_ADD_REPLACE:
+		state_add_replace = (state_add_replace + 1) % ADD_REPLACE_LENGTH;
+		print_add_replace();
+		break;
+
+	case LA_STATE_VOLUME:
+		return do_change_volume(conn, 0, true);
+
 	default:
 		return -1;
 	}
@@ -755,7 +929,7 @@ do_left(Control ctrl, struct mpd_connection* conn)
 		}
 		else
 		{
-			state_list_rl_offset = strlen(list_contents[state_list]) - 16;
+			state_list_rl_offset = len - 16;
 			if(state_list_rl_offset < 0){
 				state_list_rl_offset = 0;
 			}
@@ -763,6 +937,10 @@ do_left(Control ctrl, struct mpd_connection* conn)
 
 		print_list();
 		break;
+	
+	case LA_STATE_VOLUME:
+		return do_change_volume(conn, -1, false);
+	
 	default:
 		return 0;
 	}
@@ -793,6 +971,10 @@ do_right(Control ctrl, struct mpd_connection* conn)
 
 		print_list();
 		break;
+
+	case LA_STATE_VOLUME:
+		return do_change_volume(conn, 1, false);
+
 	default:
 		return 0;
 	}
@@ -804,6 +986,7 @@ do_ok(Control ctrl, struct mpd_connection* conn)
 {
 	switch(state)
 	{
+
 	case LA_STATE_MENU:
 		switch(state_menu)
 		{
@@ -823,6 +1006,7 @@ do_ok(Control ctrl, struct mpd_connection* conn)
 			break;
 		}
 		break;
+
 	case LA_STATE_LIST:
 		if(state_list_path == NULL)
 		{
@@ -830,8 +1014,15 @@ do_ok(Control ctrl, struct mpd_connection* conn)
 		}
 		else
 		{
-			return do_replace_playing_with_selected(conn);
+			state = LA_STATE_ADD_REPLACE;
+			state_add_replace = 0;
+			print_add_replace();
 		}
+		break;
+
+	case LA_STATE_ADD_REPLACE:
+		return do_replace_playing_with_selected(conn, state_add_replace == 0);
+
 	default:
 		return -1;
 	}
