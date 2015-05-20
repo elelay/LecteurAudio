@@ -51,7 +51,7 @@ static void print_list();
 static void print_settings();
 static int do_shutdown();
 static int print_status(struct mpd_connection *conn);
-
+static int do_sleep(struct mpd_connection* conn);
 LaState state;
 
 int state_menu;
@@ -72,8 +72,9 @@ int state_settings;
 static char log_buffer[16];
 
 #define LA_SIG_INACTIVE 123
-timer_t timer_inactive;  
+timer_t timer_inactive;
 volatile sig_atomic_t inactive_flag = 0;
+bool asleep = false;
 
 #define LA_SIG_SLEEP 124
 timer_t timer_sleep;
@@ -111,7 +112,7 @@ connect_to_mpd(struct mpd_connection **conn)
 			LOG_ERROR("%s", "Out of memory");
 			return -1;
 		}
-	
+
 		if (mpd_connection_get_error(*conn) == MPD_ERROR_SUCCESS)
 		{
 			return 0;
@@ -137,7 +138,7 @@ do_replace_playing_with_selected(struct mpd_connection* conn, bool replace)
 
  	CHECK_CONNECTION(conn);
  	mpd_run_noidle(conn);
- 	
+
  	if(replace)
  	{
  		if(!mpd_run_clear(conn))
@@ -167,7 +168,7 @@ do_replace_playing_with_selected(struct mpd_connection* conn, bool replace)
 		LOG_ERROR("Unable to put mpd in idle mode%s\n","");
 		return -1;
 	}
-	
+
 	return 0;
 }
 
@@ -188,10 +189,10 @@ fetch_and_print_volume(struct mpd_connection *conn)
 	}
 
 	volume = mpd_status_get_volume(status);
-	
+
 	la_lcdClear();
 	la_lcdHome();
-	
+
 	if(volume == -1)
 	{
 		la_lcdPuts("E: no volume");
@@ -201,7 +202,7 @@ fetch_and_print_volume(struct mpd_connection *conn)
 		snprintf(log_buffer,16, "%2i%%", volume);
 		la_lcdPuts(log_buffer);
 	}
-	
+
 	mpd_status_free(status);
 
 	mpd_response_finish(conn);
@@ -241,7 +242,7 @@ do_change_volume(struct mpd_connection *conn, int inc, bool set)
 			return -1;
 		}
 	}
-	
+
  	status = mpd_run_status(conn);
 	if (!status) {
 		LOG_ERROR("%s", mpd_connection_get_error_message(conn));
@@ -249,10 +250,10 @@ do_change_volume(struct mpd_connection *conn, int inc, bool set)
 	}
 
 	volume = mpd_status_get_volume(status);
-	
+
 	la_lcdClear();
 	la_lcdHome();
-	
+
 	if(volume == -1)
 	{
 		la_lcdPuts("E: no volume");
@@ -262,7 +263,7 @@ do_change_volume(struct mpd_connection *conn, int inc, bool set)
 		snprintf(log_buffer,16, "%2i%%", volume);
 		la_lcdPuts(log_buffer);
 	}
-	
+
 	mpd_status_free(status);
 
 	mpd_response_finish(conn);
@@ -306,10 +307,10 @@ print_status(struct mpd_connection *conn)
 				}
 			}
 		}
-		
+
 		la_lcdPosition(0,0);
 		la_lcdPuts(value);
-		
+
 		if((value = (char*)mpd_song_get_tag(song, MPD_TAG_ARTIST, 0)) == NULL)
 		{
 			if((value = (char*)mpd_song_get_uri(song)) == NULL)
@@ -334,7 +335,7 @@ print_status(struct mpd_connection *conn)
 				}
 			}
 		}
-		
+
 		la_lcdPosition(0,1);
 		la_lcdPuts(value);
 
@@ -394,10 +395,10 @@ fetch_and_print_list_artists(struct mpd_connection *conn)
 	StringList *buf, *tmp, *cur;
 	char** tmpl;
 	int tmp_len,tmp_list_len;
-	
+
 	tmp_len = 0;
 	cur = NULL;
-	
+
  	CHECK_CONNECTION(conn);
  	mpd_run_noidle(conn);
 
@@ -434,7 +435,7 @@ fetch_and_print_list_artists(struct mpd_connection *conn)
 		tmp_list_len--;
 	}
 	free(list_contents);
-	
+
 	list_contents = calloc(tmp_len, sizeof(char*));
 	cur = buf;
 	for(tmpl = list_contents; cur != NULL; tmpl++)
@@ -445,11 +446,11 @@ fetch_and_print_list_artists(struct mpd_connection *conn)
 		free(tmp);
 	}
 	list_length = tmp_len;
-	
+
 	state_list = 0;
 	state_list_rl_offset = 0;
 	print_list();
-	
+
 	return 0;
 }
 
@@ -486,10 +487,10 @@ fetch_and_print_list(struct mpd_connection *conn, char* path)
 	const struct mpd_directory* dir;
 	const struct mpd_song* song;
 	char *value, *uri;
-	
+
 	tmp_len = 0;
 	cur = NULL;
-	
+
  	CHECK_CONNECTION(conn);
  	mpd_run_noidle(conn);
 
@@ -559,10 +560,10 @@ fetch_and_print_list(struct mpd_connection *conn, char* path)
 				tmp_len++;
 			}
 		}
-		
+
 		mpd_entity_free(entity);
 	}
-	
+
 	mpd_response_finish(conn);
 	CHECK_CONNECTION(conn);
 
@@ -586,7 +587,7 @@ fetch_and_print_list(struct mpd_connection *conn, char* path)
 	free(list_contents);
 	free(list_uris);
 	list_uris = NULL;
-	
+
 	list_contents = calloc(tmp_len, sizeof(char*));
 	cur = buf;
 	for(tmpl = list_contents; cur != NULL; tmpl++)
@@ -597,7 +598,7 @@ fetch_and_print_list(struct mpd_connection *conn, char* path)
 		free(tmp);
 	}
 	list_length = tmp_len;
-	
+
 	if(path != NULL)
 	{
 		list_uris = calloc(tmp_len, sizeof(char*));
@@ -615,7 +616,7 @@ fetch_and_print_list(struct mpd_connection *conn, char* path)
 	state_list_rl_offset = 0;
 	state_list_path = path;
 	print_list();
-	
+
 	return 0;
 }
 
@@ -638,7 +639,7 @@ static void
 sigrt_handler(int sig, siginfo_t *si, void *uc)
 {
    printf("Caught signal %d with value %d\n", sig, si->si_value.sival_int);
-   
+
    if(si->si_value.sival_int == LA_SIG_INACTIVE)
    {
    	   inactive_flag |= 1;
@@ -656,7 +657,7 @@ setup_timers()
 	struct sigevent sevp;
 	struct sigaction sa;
 	sigset_t mask;
-	
+
 	// signal
 	sa.sa_flags = SA_SIGINFO;
 	sa.sa_sigaction = sigrt_handler;
@@ -666,7 +667,7 @@ setup_timers()
 		LOG_ERROR("sigaction: %s", strerror(errno));
 		exit(-1);
 	}
-	
+
 	// bloqué en temps normal
 	sigemptyset(&mask);
 	sigaddset(&mask, SIGRTMIN);
@@ -701,20 +702,28 @@ static void reset_timers()
 
 	its.it_value.tv_sec = 10;
 	its.it_value.tv_nsec = 0;
-	its.it_interval.tv_nsec = 0;
 	its.it_interval.tv_sec = 0;
-	
+	its.it_interval.tv_nsec = 0;
+
+	printf("D: reset_timers\n");
+
 	if(timer_settime(timer_inactive, 0, &its, NULL))
 	{
 		LOG_ERROR("timer_settime: %s\n", strerror(errno));
 		exit(-1);
 	}
-	
+
 	its.it_value.tv_sec = 1200;
 	if(timer_settime(timer_sleep, 0, &its, NULL))
 	{
 		LOG_ERROR("timer_settime: %s\n", strerror(errno));
 		exit(-1);
+	}
+
+	if(asleep)
+	{
+		la_ecran_change_state(false);
+		asleep = false;
 	}
 }
 
@@ -725,7 +734,8 @@ static void wait_input_async(struct mpd_connection* conn, int mpd_fd, int* contr
 	int nfds, epollfd;
 	int n;
 	sigset_t mask;
-	
+	int ret;
+
 	sigemptyset(&mask);
 
 	setup_timers();
@@ -736,7 +746,7 @@ static void wait_input_async(struct mpd_connection* conn, int mpd_fd, int* contr
 		perror("epoll_create1");
 		return;
 	}
-	
+
 	ev.events = EPOLLIN;
 	ev.data.fd = mpd_fd;
 	if (epoll_ctl(epollfd, EPOLL_CTL_ADD, mpd_fd, &ev) == -1)
@@ -744,10 +754,10 @@ static void wait_input_async(struct mpd_connection* conn, int mpd_fd, int* contr
 		perror("epoll_ctl: mpd");
 		return;
 	}
-	
+
 	for(n=0; n<control_fds_count; n++)
 	{
-		
+
 		ev.events = EPOLLIN;
 		ev.data.fd = control_fds[n];
 		if (epoll_ctl(epollfd, EPOLL_CTL_ADD, control_fds[n], &ev) == -1)
@@ -755,25 +765,51 @@ static void wait_input_async(struct mpd_connection* conn, int mpd_fd, int* contr
 			perror("epoll_ctl: controls");
 			return;
 		}
-		
+
 	}
-	
+
 	if(!mpd_send_idle(conn))
 	{
 		LOG_ERROR("Unable to put mpd in idle mode%s\n","");
 		return;
 	}
-	
+
 	reset_timers();
 
 	while(true)
 	{
 		nfds = epoll_pwait(epollfd, events, MAX_EVENTS, -1, &mask);
 		if (nfds == -1) {
-			perror("epoll_pwait");
-			return;
+			if(errno == EINTR)
+			{
+				if(inactive_flag)
+				{
+					inactive_flag = 0;
+					la_ecran_change_state(true);
+					asleep = true;
+				}
+				else if(sleep_flag)
+				{
+					sleep_flag = 0;
+					if(do_sleep(conn))
+					{
+						return;
+					}
+				}
+				else
+				{
+					LOG_ERROR("%s", "int by signal\n");
+					return;
+				}
+				continue;
+			}
+			else
+			{
+				perror("epoll_pwait");
+				continue;
+			}
 		}
-		
+
 		for (n = 0; n < nfds; n++)
 		{
 			if (events[n].data.fd == mpd_fd)
@@ -793,9 +829,15 @@ static void wait_input_async(struct mpd_connection* conn, int mpd_fd, int* contr
 			}
 			else
 			{
-				if(la_control_input_one(events[n].data.fd))
+				ret = la_control_input_one(events[n].data.fd);
+
+				if(ret < 0)
 				{
 					return;
+				}
+				else if(ret == 0)
+				{
+					reset_timers();
 				}
 			}
 		}
@@ -811,6 +853,21 @@ static int do_playpause(Control ctrl, struct mpd_connection* conn){
  	{
 		print_status(conn);
 	}
+	if(!mpd_send_idle(conn))
+	{
+		LOG_ERROR("Unable to put mpd in idle mode%s\n","");
+		return -1;
+	}
+	return 0;
+}
+
+static int do_sleep(struct mpd_connection* conn)
+{
+	CHECK_CONNECTION(conn);
+	mpd_run_noidle(conn);
+	mpd_run_pause(conn, true);
+	CHECK_CONNECTION(conn);
+
 	if(!mpd_send_idle(conn))
 	{
 		LOG_ERROR("Unable to put mpd in idle mode%s\n","");
@@ -1051,10 +1108,10 @@ do_left(Control ctrl, struct mpd_connection* conn)
 
 		print_list();
 		break;
-	
+
 	case LA_STATE_VOLUME:
 		return do_change_volume(conn, -1, false);
-	
+
 	default:
 		return 0;
 	}
@@ -1164,7 +1221,7 @@ main(int argc, char ** argv)
 		fprintf(stderr, "E: init controls\n");
 		return -1;
 	}
-	
+
 	la_init_ecran();
 	la_lcdHome();
 	la_lcdPutChar('H');
@@ -1174,7 +1231,7 @@ main(int argc, char ** argv)
 		la_exit();
 		return -1;
 	}
-	
+
 	mpd_fd = mpd_async_get_fd(mpd_connection_get_async(conn));
 
 	print_status(conn);
@@ -1186,8 +1243,8 @@ main(int argc, char ** argv)
 	la_on_key(LA_LEFT, (Callback)do_left, conn);
 	la_on_key(LA_RIGHT, (Callback)do_right, conn);
 	la_on_key(LA_OK, (Callback)do_ok, conn);
-	
-	
+
+
 	wait_input_async(conn, mpd_fd, fdControls, fdControlCount);
 
 	mpd_connection_free(conn);

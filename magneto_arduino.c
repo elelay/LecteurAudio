@@ -123,14 +123,14 @@ int la_control_input_one(int fd)
 		return -1;
 	}
 	else if(len != 8){
-		if(strstr(buf, "got "))
+		if(strstr(buf, "got ") != buf)
 		{
 			fprintf(stderr, "E: invalid read (%i) from arduino:%s\n", len, buf);
 			return 0;
 		}
 		else
 		{
-			return 0;
+			return 1;
 		}
 	}
 
