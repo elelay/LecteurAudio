@@ -31,6 +31,7 @@
 #include <stdlib.h>
 #include <signal.h>
 #include <sys/epoll.h>
+#include <sys/wait.h>
 #include <time.h>
 
 #include "ecran.h"
@@ -49,7 +50,7 @@ typedef enum {
 
 static void print_list();
 static void print_settings();
-static int do_shutdown();
+static int do_shutdown(struct mpd_connection *conn);
 static int print_status(struct mpd_connection *conn);
 static int do_sleep(struct mpd_connection* conn);
 LaState state;
@@ -1172,7 +1173,7 @@ do_ok(Control ctrl, struct mpd_connection* conn)
 			state_settings = 0;
 			print_settings();
 		case 3:
-			return do_shutdown();
+			return do_shutdown(conn);
 		default:
 			break;
 		}
@@ -1201,9 +1202,37 @@ do_ok(Control ctrl, struct mpd_connection* conn)
 }
 
 static int
-do_shutdown()
+do_shutdown(struct mpd_connection* conn)
 {
-	la_ecran_change_state(true);
+	char* argv[2] = { "/bin/halt" , NULL};
+	pid_t child_pid;
+	int child_status;
+	pid_t tpid;
+
+	CHECK_CONNECTION(conn);
+	mpd_run_noidle(conn);
+	mpd_run_pause(conn, true);
+	CHECK_CONNECTION(conn);
+
+	la_lcdClear();
+	la_lcdHome();
+	la_lcdPuts("A Bientot...");
+
+	child_pid = fork();
+	if(child_pid == 0) {
+
+		execvp(argv[0], argv);
+
+		printf("E: Unknown command: %s\n", argv[0]);
+		exit(0);
+	}
+	else {
+		do {
+			tpid = wait(&child_status);
+		} while(tpid != child_pid);
+
+		return child_status;
+	}
 	return 0;
 }
 
