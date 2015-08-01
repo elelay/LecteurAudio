@@ -1,0 +1,12 @@
+[Unit]
+Description=Lecteur Audio
+Requires=mpd
+After=mpd
+[Service]
+Type=simple
+ExecStart=/root/LecteurAudio/la
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target 
