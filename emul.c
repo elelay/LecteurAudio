@@ -110,7 +110,7 @@ void la_wait_input(){
 }
 
 int
-la_control_input_one(int)
+la_control_input_one(int x)
 {
 	int in;
 	in = _la_control_input_one();
@@ -164,4 +164,8 @@ _la_control_input_one()
 		return callbacks[c](c, callback_params[c]);
 	}
 	return 0;
+}
+
+void la_ecran_change_state(bool sleep) {
+	//NOOP
 }

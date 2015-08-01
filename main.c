@@ -105,9 +105,10 @@ volatile sig_atomic_t sleep_flag = 0;
 static int
 connect_to_mpd(struct mpd_connection **conn)
 {
-	int retry = 3;
+	int retry = 30;
+	int t = 1;
 	// pour attendre que le service soit bien démarré
-	while(retry > 0){
+	while(t <= retry){
 		*conn = mpd_connection_new(NULL, 0, 30000);
 		if (*conn == NULL) {
 			LOG_ERROR("%s", "Out of memory");
@@ -120,12 +121,12 @@ connect_to_mpd(struct mpd_connection **conn)
 		}
 		else
 		{
-			LOG_ERROR("%s", mpd_connection_get_error_message(*conn));
+			LOG_ERROR("%d/%d %s", t, retry, mpd_connection_get_error_message(*conn));
 			mpd_connection_free(*conn);
 			*conn = NULL;
 			sleep(3);
 		}
-		retry--;
+		t++;
 	}
 	return -1;
 }
