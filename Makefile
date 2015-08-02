@@ -33,3 +33,6 @@ leds_on_off: leds_on_off.o
 
 clean:
 	rm -f la *.o
+
+grind:
+	valgrind --log-file=grind.log ./la

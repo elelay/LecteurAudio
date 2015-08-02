@@ -45,7 +45,7 @@
 #define COLOR_CODE 0x1B
 
 typedef enum {
-	LA_STATE_PLAYING, LA_STATE_MENU, LA_STATE_LIST, LA_STATE_ADD_REPLACE, LA_STATE_VOLUME, LA_STATE_SETTINGS
+	LA_STATE_PLAYING, LA_STATE_MENU, LA_STATE_LIST, LA_STATE_ADD_REPLACE, LA_STATE_VOLUME, LA_STATE_SETTINGS, LA_STATE_RADIO
 } LaState;
 
 static void print_list();
@@ -53,6 +53,7 @@ static void print_settings();
 static int do_shutdown(struct mpd_connection *conn);
 static int print_status(struct mpd_connection *conn);
 static int do_sleep(struct mpd_connection* conn);
+static void free_list_state();
 LaState state;
 
 int state_menu;
@@ -65,6 +66,16 @@ int state_list;
 char* state_list_path;
 int state_list_dir_index;
 int state_list_rl_offset;
+
+#define LIST_RADIOS_LEN 2
+const char* list_radios[LIST_RADIOS_LEN] = {
+	"France Inter",
+	"Radio Rennes"
+};
+const char* list_radios_uris[LIST_RADIOS_LEN] = {
+	"http://audio.scdn.arkena.com/11008/franceinter-midfi128.mp3",
+	"http://sv2.vestaradio.com:5750/;stream.mp3"
+};
 
 int state_add_replace;
 
@@ -390,71 +401,71 @@ mk_string_list()
 	return tmp;
 }
 
-static int
-fetch_and_print_list_artists(struct mpd_connection *conn)
-{
-	struct mpd_pair *pair;
-	StringList *buf, *tmp, *cur;
-	char** tmpl;
-	int tmp_len,tmp_list_len;
+// static int
+// fetch_and_print_list_artists(struct mpd_connection *conn)
+// {
+// 	struct mpd_pair *pair;
+// 	StringList *buf, *tmp, *cur;
+// 	char** tmpl;
+// 	int tmp_len,tmp_list_len;
 
-	tmp_len = 0;
-	cur = NULL;
+// 	tmp_len = 0;
+// 	cur = NULL;
 
- 	CHECK_CONNECTION(conn);
- 	mpd_run_noidle(conn);
+//  	CHECK_CONNECTION(conn);
+//  	mpd_run_noidle(conn);
 
-	mpd_search_db_tags(conn, MPD_TAG_ARTIST);
-	mpd_search_commit(conn);
-	CHECK_CONNECTION(conn);
+// 	mpd_search_db_tags(conn, MPD_TAG_ARTIST);
+// 	mpd_search_commit(conn);
+// 	CHECK_CONNECTION(conn);
 
-	tmp_len = 0;
-	while ((pair = mpd_recv_pair_tag(conn, MPD_TAG_ARTIST)) != NULL) {
-		if (cur == NULL)
-		{
-			buf = tmp = mk_string_list();
-			tmp->value = strdup(pair->value);
-		}
-		else
-		{
-			tmp = mk_string_list();
-			tmp->value = strdup(pair->value);
-			cur->next = tmp;
-		}
-		cur = tmp;
-		tmp_len++;
-		mpd_return_pair(conn, pair);
-	}
+// 	tmp_len = 0;
+// 	while ((pair = mpd_recv_pair_tag(conn, MPD_TAG_ARTIST)) != NULL) {
+// 		if (cur == NULL)
+// 		{
+// 			buf = tmp = mk_string_list();
+// 			tmp->value = strdup(pair->value);
+// 		}
+// 		else
+// 		{
+// 			tmp = mk_string_list();
+// 			tmp->value = strdup(pair->value);
+// 			cur->next = tmp;
+// 		}
+// 		cur = tmp;
+// 		tmp_len++;
+// 		mpd_return_pair(conn, pair);
+// 	}
 
-	mpd_response_finish(conn);
-	CHECK_CONNECTION(conn);
+// 	mpd_response_finish(conn);
+// 	CHECK_CONNECTION(conn);
 
-	tmp_list_len = list_length;
-	list_length = 0;
-	for(tmpl = list_contents; tmp_list_len != 0; tmpl++)
-	{
-		free(*tmpl);
-		tmp_list_len--;
-	}
-	free(list_contents);
+// 	tmp_list_len = list_length;
+// 	list_length = 0;
+// 	for(tmpl = list_contents; tmp_list_len != 0; tmpl++)
+// 	{
+// 		free(*tmpl);
+// 		tmp_list_len--;
+// 	}
+// 	free(list_contents);
 
-	list_contents = calloc(tmp_len, sizeof(char*));
-	cur = buf;
-	for(tmpl = list_contents; cur != NULL; tmpl++)
-	{
-		*tmpl = cur->value;
-		tmp = cur;
-		cur = cur->next;
-		free(tmp);
-	}
-	list_length = tmp_len;
+// 	list_contents = calloc(tmp_len, sizeof(char*));
+// 	cur = buf;
+// 	for(tmpl = list_contents; cur != NULL; tmpl++)
+// 	{
+// 		*tmpl = cur->value;
+// 		tmp = cur;
+// 		cur = cur->next;
+// 		free(tmp);
+// 	}
+// 	list_length = tmp_len;
 
-	state_list = 0;
-	state_list_rl_offset = 0;
-	print_list();
+// 	state_list = 0;
+// 	state_list_rl_offset = 0;
+// 	print_list();
 
-	return 0;
-}
+// 	return 0;
+// }
 
 static char*
 la_mpd_song_get_filename(const struct mpd_song* song)
@@ -479,12 +490,34 @@ la_mpd_song_get_filename(const struct mpd_song* song)
 	return strdup(value);
 }
 
+static void
+free_list_state()
+{
+	size_t tmp_list_len;
+	char **tmpl, **fns_tmpl;
+	
+	tmp_list_len = list_length;
+	list_length = 0;
+	for(tmpl = list_contents, fns_tmpl = list_uris; tmp_list_len != 0; tmpl++, fns_tmpl++)
+	{
+		free(*tmpl);
+		if(list_uris != NULL)
+		{
+			free(*fns_tmpl);
+		}
+		tmp_list_len--;
+	}
+	free(list_contents);
+	free(list_uris);
+	list_uris = NULL;
+}
+
 static int
 fetch_and_print_list(struct mpd_connection *conn, char* path)
 {
 	StringList *buf, *tmp, *cur, *fns, *cur_fns, *tmp_fns;
-	char **tmpl, **fns_tmpl;
-	int tmp_len,tmp_list_len;
+	char **tmpl;
+	int tmp_len;
 	struct mpd_entity* entity;
 	const struct mpd_directory* dir;
 	const struct mpd_song* song;
@@ -575,20 +608,8 @@ fetch_and_print_list(struct mpd_connection *conn, char* path)
 		return -1;
 	}
 
-	tmp_list_len = list_length;
 	list_length = 0;
-	for(tmpl = list_contents, fns_tmpl = list_uris; tmp_list_len != 0; tmpl++, fns_tmpl++)
-	{
-		free(*tmpl);
-		if(list_uris != NULL)
-		{
-			free(*fns_tmpl);
-		}
-		tmp_list_len--;
-	}
-	free(list_contents);
-	free(list_uris);
-	list_uris = NULL;
+	free_list_state();
 
 	list_contents = calloc(tmp_len, sizeof(char*));
 	cur = buf;
@@ -617,6 +638,31 @@ fetch_and_print_list(struct mpd_connection *conn, char* path)
 	state_list = 0;
 	state_list_rl_offset = 0;
 	state_list_path = path;
+	print_list();
+
+	return 0;
+}
+
+
+
+static int
+fetch_and_print_list_radio()
+{
+	int i;
+
+	free_list_state();
+
+	list_contents = calloc(LIST_RADIOS_LEN, sizeof(char*));
+	list_uris = calloc(LIST_RADIOS_LEN, sizeof(char*));
+	for(i=0;i<LIST_RADIOS_LEN;i++)
+	{
+		list_contents[i] = strdup(list_radios[i]);
+		list_uris[i] = strdup(list_radios_uris[i]);
+	}
+	list_length = LIST_RADIOS_LEN;
+
+	state_list = 0;
+	state_list_rl_offset = 0;
 	print_list();
 
 	return 0;
@@ -656,8 +702,8 @@ sigrt_handler(int sig, siginfo_t *si, void *uc)
 static void
 setup_timers()
 {
-	struct sigevent sevp;
-	struct sigaction sa;
+	struct sigevent sevp = {0};
+	struct sigaction sa = {0};
 	sigset_t mask;
 
 	// signal
@@ -732,7 +778,7 @@ static void reset_timers()
 #define MAX_EVENTS 10
 static void wait_input_async(struct mpd_connection* conn, int mpd_fd, int* control_fds, int control_fds_count)
 {
-	struct epoll_event ev, events[MAX_EVENTS];
+	struct epoll_event ev={0}, events[MAX_EVENTS];
 	int nfds, epollfd;
 	int n;
 	sigset_t mask;
@@ -878,10 +924,11 @@ static int do_sleep(struct mpd_connection* conn)
 	return 0;
 }
 
-#define MENU_LENGTH 4
+#define MENU_LENGTH 5
 static char* menu_contents[MENU_LENGTH] = {
 	"List...",
 	"Volume...",
+	"Radio...",
 	"Settings...",
 	"Off"
 };
@@ -1022,6 +1069,7 @@ do_up(Control ctrl, struct mpd_connection* conn)
 		break;
 
 	case LA_STATE_LIST:
+	case LA_STATE_RADIO:
 		if(state_list == 0)
 		{
 			state_list = list_length - 1;
@@ -1067,6 +1115,7 @@ do_down(Control ctrl, struct mpd_connection* conn)
 		jump_forward(conn);
 		break;
 	case LA_STATE_LIST:
+	case LA_STATE_RADIO:
 		state_list = (state_list + 1) % list_length;
 		print_list();
 		break;
@@ -1091,6 +1140,7 @@ do_left(Control ctrl, struct mpd_connection* conn)
 	switch(state)
 	{
 	case LA_STATE_LIST:
+	case LA_STATE_RADIO:
 		len = strlen(list_contents[state_list]);
 		if(state_list_rl_offset > 14)
 		{
@@ -1128,6 +1178,7 @@ do_right(Control ctrl, struct mpd_connection* conn)
 	switch(state)
 	{
 	case LA_STATE_LIST:
+	case LA_STATE_RADIO:
 		len = strlen(list_contents[state_list]);
 		if(state_list_rl_offset < len - 28)
 		{
@@ -1167,13 +1218,16 @@ do_ok(Control ctrl, struct mpd_connection* conn)
 			state = LA_STATE_LIST;
 			return fetch_and_print_list(conn, NULL);
 		case 1:
-			state  = LA_STATE_VOLUME;
+			state = LA_STATE_VOLUME;
 			return fetch_and_print_volume(conn);
 		case 2:
+			state = LA_STATE_RADIO;
+			return fetch_and_print_list_radio();
+		case 3:
 			state  = LA_STATE_SETTINGS;
 			state_settings = 0;
 			print_settings();
-		case 3:
+		case 4:
 			return do_shutdown(conn);
 		default:
 			break;
@@ -1192,6 +1246,8 @@ do_ok(Control ctrl, struct mpd_connection* conn)
 			print_add_replace();
 		}
 		break;
+	case LA_STATE_RADIO:
+		return do_replace_playing_with_selected(conn, true);
 
 	case LA_STATE_ADD_REPLACE:
 		return do_replace_playing_with_selected(conn, state_add_replace == 0);
