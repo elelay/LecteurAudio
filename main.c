@@ -44,6 +44,9 @@
 #define BG_BLACK 40
 #define COLOR_CODE 0x1B
 
+#define DEFAULT_LOG_FILE "/var/log/la.out"
+#define DEFAULT_ERROR_FILE "/var/log/la.err"
+
 typedef enum {
 	LA_STATE_PLAYING, LA_STATE_MENU, LA_STATE_LIST, LA_STATE_ADD_REPLACE, LA_STATE_VOLUME, LA_STATE_SETTINGS, LA_STATE_RADIO
 } LaState;
@@ -1295,7 +1298,7 @@ do_shutdown(struct mpd_connection* conn)
 
 
 int
-main(int argc, char ** argv)
+run()
 {
 	struct mpd_connection *conn = NULL;
 	int mpd_fd;
@@ -1336,4 +1339,91 @@ main(int argc, char ** argv)
 	mpd_connection_free(conn);
 	la_exit();
 	return 0;
+}
+
+int
+save_pid()
+{
+	FILE* f;
+	f = fopen("/var/run/la.pid", "w");
+	pid_t pid;
+	int ret;
+	if(f)
+	{
+		pid = getpid();
+		fprintf(f, "%d\n", pid);
+		ret = fclose(f);
+	}
+	else
+	{
+		perror("E: unable to save pid");
+		ret = -1;
+	}
+	return ret;
+}
+
+int
+run_in_background()
+{
+	int ret;
+	ret = daemon(0, 1);
+	if(ret)
+	{
+		perror("E: couldn't daemonize");
+		return ret;
+	}
+	else
+	{
+		if(!freopen("/dev/null", "r", stdin)
+			|| !freopen(DEFAULT_LOG_FILE, "w", stdout)
+			|| !freopen(DEFAULT_ERROR_FILE, "a", stderr))
+		{
+			perror("E: unable to redirect output");
+			return -1;
+		}
+		setlinebuf(stdout);
+		setlinebuf(stderr);
+		printf("I: I'm a daemon now\n");
+		//fflush(stdout);
+		return save_pid() || run();
+	}
+}
+
+int
+usage(int argc, char** argv, int code)
+{
+	const char* progname;
+	if(argc > 0)
+	{
+		progname = argv[0];
+	}
+	else
+	{
+		progname = "la";
+	}
+	printf(
+		"Usage: %s [-b]\n"
+		"LecteurAudio: a homemade media player\n"
+		"  -b, --background    daemonize\n"
+		"  -h, --help          print this help\n", progname);
+	return code;
+}
+
+int
+main(int argc, char ** argv){
+	if(argc > 1 && 
+		(!strcmp("-h", argv[1]) || !strcmp("--help", argv[1])))
+	{
+		return usage(argc, argv, 0);
+	}
+	if(argc == 2 &&
+		(!strcmp("-b", argv[1]) || !strcmp("--background", argv[1])))
+	{
+		return run_in_background();
+	}
+	if(argc > 1)
+	{
+		return usage(argc, argv, -1);
+	}
+	return run();	
 }
