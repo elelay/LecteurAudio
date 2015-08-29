@@ -11,7 +11,10 @@ endif
 ALL:=la leds_on_off
 
 CFLAGS:=-Wall $(INC) -g
-LDFLAGS:=-lmpdclient -lrt $(LINK)
+# alarmpi
+# LDFLAGS:=-lmpdclient -lrt $(LINK)
+# raspbian
+LDFLAGS:=-L/opt/libmpdclient210/lib -Wl,-rpath -Wl,/opt/libmpdclient210/lib -lmpdclient -lrt $(LINK)
 
 .PHONY: all clean
 
