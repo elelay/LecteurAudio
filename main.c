@@ -34,6 +34,8 @@
 #include <sys/wait.h>
 #include <time.h>
 
+#include <curl/curl.h>
+
 #include "ecran.h"
 #include "controles.h"
 
@@ -46,6 +48,7 @@
 
 #define DEFAULT_LOG_FILE "/var/log/la.out"
 #define DEFAULT_ERROR_FILE "/var/log/la.err"
+#define DEFAULT_WLAN_ITF "wlan0"
 
 typedef enum {
 	LA_STATE_PLAYING, LA_STATE_MENU, LA_STATE_LIST, LA_STATE_ADD_REPLACE, LA_STATE_VOLUME, LA_STATE_SETTINGS, LA_STATE_RADIO
@@ -56,7 +59,10 @@ static void print_settings();
 static int do_shutdown(struct mpd_connection *conn);
 static int print_status(struct mpd_connection *conn);
 static int do_sleep(struct mpd_connection* conn);
+static int do_wifi_status();
 static void free_list_state();
+static int reconnect_to_mpd(struct mpd_connection **conn);
+
 LaState state;
 
 int state_menu;
@@ -116,20 +122,41 @@ volatile sig_atomic_t sleep_flag = 0;
 		return -1; \
 	}
 
+
+static int
+reconnect_to_mpd(struct mpd_connection **conn)
+{
+	*conn = mpd_connection_new(NULL, 0, 30000);
+	if (*conn == NULL) {
+		LOG_ERROR("%s", "Out of memory");
+		return -1;
+	}
+
+	if (mpd_connection_get_error(*conn) == MPD_ERROR_SUCCESS)
+	{
+		return 0;
+	}
+	else
+	{
+		return 1;
+	}
+}
+
 static int
 connect_to_mpd(struct mpd_connection **conn)
 {
 	int retry = 30;
 	int t = 1;
+	int ret;
 	// pour attendre que le service soit bien démarré
 	while(t <= retry){
-		*conn = mpd_connection_new(NULL, 0, 30000);
-		if (*conn == NULL) {
-			LOG_ERROR("%s", "Out of memory");
-			return -1;
+		ret = reconnect_to_mpd(conn);
+		if (ret == -1)  // fatal
+		{
+			return ret;
 		}
 
-		if (mpd_connection_get_error(*conn) == MPD_ERROR_SUCCESS)
+		if (ret == 0)
 		{
 			return 0;
 		}
@@ -369,6 +396,9 @@ print_status(struct mpd_connection *conn)
 
 	la_lcdPosition(15, 1);
 	switch (mpd_status_get_state(status)){
+	case MPD_STATE_STOP:
+		la_lcdPutChar('X');
+		break;
 	case MPD_STATE_PLAY:
 		la_lcdPutChar('P');
 		break;
@@ -385,6 +415,36 @@ print_status(struct mpd_connection *conn)
 	CHECK_CONNECTION(conn);
 
 	return 0;
+}
+
+static bool
+is_stream_in_queue(struct mpd_connection* conn)
+{
+	struct mpd_status *status;
+	struct mpd_song *song;
+	char *value;
+	bool ret = false;
+
+	song = mpd_run_current_song(conn);
+	if (song != NULL) {
+
+		if((value = (char*)mpd_song_get_uri(song)) == NULL)
+		{
+			fprintf(stderr, "E: is_stream_in_queue NO URI\n");
+		}
+		else
+		{
+			ret = strstr(value, "http://") == value;
+		}
+
+		mpd_song_free(song);
+	}
+
+	mpd_response_finish(conn);
+
+	CHECK_CONNECTION(conn);
+
+	return ret;
 }
 
 typedef struct StringList {
@@ -498,7 +558,7 @@ free_list_state()
 {
 	size_t tmp_list_len;
 	char **tmpl, **fns_tmpl;
-	
+
 	tmp_list_len = list_length;
 	list_length = 0;
 	for(tmpl = list_contents, fns_tmpl = list_uris; tmp_list_len != 0; tmpl++, fns_tmpl++)
@@ -895,12 +955,48 @@ static void wait_input_async(struct mpd_connection* conn, int mpd_fd, int* contr
 	}
 }
 
+static int do_play(struct mpd_connection* conn){
+
+ 	CHECK_CONNECTION(conn);
+
+	mpd_run_play(conn);
+ 	CHECK_CONNECTION(conn);
+
+	print_status(conn);
+
+	return 0;
+}
+
 static int do_playpause(Control ctrl, struct mpd_connection* conn){
+	struct mpd_status *status;
+
  	CHECK_CONNECTION(conn);
  	mpd_run_noidle(conn);
-	mpd_run_toggle_pause(conn);
+
+	status = mpd_run_status(conn);
+	if (!status) {
+		LOG_ERROR("%s", mpd_connection_get_error_message(conn));
+		return -1;
+	}
+	mpd_response_finish(conn);
  	CHECK_CONNECTION(conn);
- 	if(state == LA_STATE_PLAYING)
+
+	switch (mpd_status_get_state(status)){
+	case MPD_STATE_STOP:
+		mpd_run_play(conn);
+		break;
+	case MPD_STATE_PLAY:
+	case MPD_STATE_PAUSE:
+		mpd_run_toggle_pause(conn);
+		break;
+	default:
+		fprintf(stderr, "E: unknown mpd status\n");
+	}
+ 	CHECK_CONNECTION(conn);
+
+	mpd_status_free(status);
+
+	if(state == LA_STATE_PLAYING)
  	{
 		print_status(conn);
 	}
@@ -985,7 +1081,7 @@ print_add_replace()
 static void
 print_settings()
 {
-	LOG_ERROR("E: %s", "print_settings");
+	do_wifi_status();
 }
 
 static int do_list_directory(struct mpd_connection* conn)
@@ -1230,6 +1326,7 @@ do_ok(Control ctrl, struct mpd_connection* conn)
 			state  = LA_STATE_SETTINGS;
 			state_settings = 0;
 			print_settings();
+			break;
 		case 4:
 			return do_shutdown(conn);
 		default:
@@ -1264,7 +1361,7 @@ do_ok(Control ctrl, struct mpd_connection* conn)
 static int
 do_shutdown(struct mpd_connection* conn)
 {
-	char* argv[2] = { "/bin/halt" , NULL};
+	char* argv[2] = { "/sbin/halt" , NULL};
 	pid_t child_pid;
 	int child_status;
 	pid_t tpid;
@@ -1296,6 +1393,96 @@ do_shutdown(struct mpd_connection* conn)
 	return 0;
 }
 
+static int
+do_internet_status()
+{
+	CURL *curl;
+	CURLcode res;
+	char errbuf[CURL_ERROR_SIZE] = {0};
+
+	la_lcdPosition(0, 1);
+	la_lcdPuts("INTERNET...");
+	la_lcdPosition(0, 12);
+
+	curl = curl_easy_init();
+
+	if(curl)
+	{
+		curl_easy_setopt(curl, CURLOPT_URL, list_radios_uris[0]);
+		curl_easy_setopt(curl, CURLOPT_HEADER, 1);
+		curl_easy_setopt(curl, CURLOPT_NOBODY, 1);
+		curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 2L);
+		curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, errbuf);
+		res = curl_easy_perform(curl);
+		curl_easy_cleanup(curl);
+
+		if(res != CURLE_OK)
+		{
+			size_t len = strlen(errbuf);
+			fprintf(stderr, "E: libcurl: (%d) ", res);
+			if(len)
+			{
+				fprintf(stderr, "%s%s", errbuf,
+					((errbuf[len - 1] != '\n') ? "\n" : ""));
+			}
+			else
+			{
+				fprintf(stderr, "%s\n", curl_easy_strerror(res));
+			}
+			la_lcdPuts("KO");
+			return -1;
+		}
+		la_lcdPuts("OK");
+		return 0;
+  	}else{
+  		fprintf(stderr, "E: couldn't initialize curl\n");
+  		la_lcdPuts("KO");
+		return -1;
+	}
+}
+
+static int
+do_wifi_status()
+{
+	char* argv[4] = { "/usr/sbin/ifplugstatus" , "-q", DEFAULT_WLAN_ITF, NULL};
+	pid_t child_pid;
+	int child_status;
+	pid_t tpid;
+
+	la_lcdClear();
+	la_lcdHome();
+	la_lcdPuts("WIFI...");
+
+	child_pid = fork();
+	if(child_pid == 0) {
+
+		execvp(argv[0], argv);
+
+		printf("E: Unknown command: %s\n", argv[0]);
+		exit(0);
+	}
+	else {
+		do {
+			tpid = wait(&child_status);
+		} while(tpid != child_pid);
+
+		if(WIFEXITED(child_status)){
+			child_status = WEXITSTATUS(child_status);
+			printf("I: ifplugstatus %d\n", child_status);
+			la_lcdPosition(12, 0);
+			if(child_status == 2){
+				la_lcdPuts("OK");
+				return do_internet_status();
+			}else{
+				la_lcdPuts("KO");
+			}
+		}else{
+			fprintf(stderr, "E: ifplugstatus didn't terminate normally\n");
+			return -1;
+		}
+	}
+	return 0;
+}
 
 int
 run()
@@ -1304,6 +1491,8 @@ run()
 	int mpd_fd;
 	int fdControlCount;
 	int* fdControls;
+	int play_ok = 0;
+	int i;
 
 	if(la_init_controls(&fdControls, &fdControlCount))
 	{
@@ -1333,6 +1522,16 @@ run()
 	la_on_key(LA_RIGHT, (Callback)do_right, conn);
 	la_on_key(LA_OK, (Callback)do_ok, conn);
 
+	if(is_stream_in_queue(conn))
+	{
+		for(i=0;  i<10 && ((play_ok = do_wifi_status()) != 0); i++){
+			sleep(1);
+		}
+	}
+	if(play_ok == 0)
+	{
+		do_play(conn);
+	}
 
 	wait_input_async(conn, mpd_fd, fdControls, fdControlCount);
 
@@ -1366,6 +1565,10 @@ int
 run_in_background()
 {
 	int ret;
+	struct timespec before;
+	struct timespec after;
+	bool keep_running = true;
+
 	ret = daemon(0, 1);
 	if(ret)
 	{
@@ -1385,7 +1588,37 @@ run_in_background()
 		setlinebuf(stderr);
 		printf("I: I'm a daemon now\n");
 		//fflush(stdout);
-		return save_pid() || run();
+		ret = save_pid();
+		if(ret){
+			return ret;
+		}else{
+			while(keep_running)
+			{
+				if(clock_gettime(CLOCK_MONOTONIC, &before))
+				{
+					perror("E: unable to get time before run");
+					return -1;
+				}
+				ret = run();
+				if(ret)
+				{
+					if(clock_gettime(CLOCK_MONOTONIC, &before))
+					{
+						perror("E: unable to get time before run");
+						return -1;
+					}
+					
+					if((after.tv_sec - before.tv_sec) < 60 * 10)
+					{
+						keep_running = false;
+						fprintf(stderr,
+							"E: run() exited too quickly (%lus), giving up\n",
+							(after.tv_sec - before.tv_sec));
+					}
+				}
+				return ret;
+			}
+		}
 	}
 }
 
@@ -1411,7 +1644,7 @@ usage(int argc, char** argv, int code)
 
 int
 main(int argc, char ** argv){
-	if(argc > 1 && 
+	if(argc > 1 &&
 		(!strcmp("-h", argv[1]) || !strcmp("--help", argv[1])))
 	{
 		return usage(argc, argv, 0);
@@ -1425,5 +1658,5 @@ main(int argc, char ** argv){
 	{
 		return usage(argc, argv, -1);
 	}
-	return run();	
+	return run();
 }

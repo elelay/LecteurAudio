@@ -2,10 +2,10 @@ ARCH:=$(strip $(shell uname -m))
 ifeq ($(ARCH),armv6l)
 RPI:=TRUE
 INC:=-DRPI
-LINK:=-lwiringPi -lwiringPiDev
+LINK:=-lwiringPi -lwiringPiDev -lcurl
 else
 INC:=
-LINK:=-lncurses
+LINK:=-lncurses -lcurl
 endif
 
 ALL:=la leds_on_off
