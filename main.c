@@ -1587,11 +1587,13 @@ run_in_background()
 		setlinebuf(stdout);
 		setlinebuf(stderr);
 		printf("I: I'm a daemon now\n");
-		//fflush(stdout);
 		ret = save_pid();
-		if(ret){
+		if(ret)
+		{
 			return ret;
-		}else{
+		}
+		else
+		{
 			while(keep_running)
 			{
 				if(clock_gettime(CLOCK_MONOTONIC, &before))
@@ -1602,13 +1604,14 @@ run_in_background()
 				ret = run();
 				if(ret)
 				{
-					if(clock_gettime(CLOCK_MONOTONIC, &before))
+					sleep(5);
+					if(clock_gettime(CLOCK_MONOTONIC, &after))
 					{
-						perror("E: unable to get time before run");
+						perror("E: unable to get time after run");
 						return -1;
 					}
 					
-					if((after.tv_sec - before.tv_sec) < 60 * 10)
+					if((after.tv_sec - before.tv_sec) < 60)
 					{
 						keep_running = false;
 						fprintf(stderr,
@@ -1616,8 +1619,8 @@ run_in_background()
 							(after.tv_sec - before.tv_sec));
 					}
 				}
-				return ret;
 			}
+			return ret;
 		}
 	}
 }
