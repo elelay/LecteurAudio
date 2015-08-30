@@ -59,7 +59,7 @@ int la_init_ecran()
 
 void la_lcdHome()
 {
-	lcdPosition(lcdHandle, 0, 0);
+	la_lcdPosition(0, 0);
 }
 
 void la_lcdClear()
