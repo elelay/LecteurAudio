@@ -1,7 +1,10 @@
 ARCH:=$(strip $(shell uname -m))
 ifeq ($(ARCH),armv6l)
 RPI:=TRUE
-INC:=-DRPI
+# alarpi
+# INC:=-DRPI
+# raspbian
+INC:=-DRPI -I/opt/libmpdclient210/include
 LINK:=-lwiringPi -lwiringPiDev -lcurl
 else
 INC:=
