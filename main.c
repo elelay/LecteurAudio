@@ -49,6 +49,7 @@
 #define DEFAULT_LOG_FILE "/var/log/la.out"
 #define DEFAULT_ERROR_FILE "/var/log/la.err"
 #define DEFAULT_WLAN_ITF "wlan0"
+//#define CONFIG_SLEEP 1
 
 typedef enum {
 	LA_STATE_PLAYING, LA_STATE_MENU, LA_STATE_LIST, LA_STATE_ADD_REPLACE, LA_STATE_VOLUME, LA_STATE_SETTINGS, LA_STATE_RADIO
@@ -799,12 +800,14 @@ setup_timers()
     	exit(-1);
     }
 
+#ifdef CONFIG_SLEEP
 	sevp.sigev_value.sival_int = LA_SIG_SLEEP;
 	if(timer_create(CLOCK_MONOTONIC, &sevp, &timer_sleep))
     {
     	LOG_ERROR("timer_create_sleep: %s\n", strerror(errno));
     	exit(-1);
     }
+#endif
 }
 
 static void reset_timers()
@@ -824,12 +827,14 @@ static void reset_timers()
 		exit(-1);
 	}
 
+#ifdef CONFIG_SLEEP
 	its.it_value.tv_sec = 1200;
 	if(timer_settime(timer_sleep, 0, &its, NULL))
 	{
 		LOG_ERROR("timer_settime: %s\n", strerror(errno));
 		exit(-1);
 	}
+#endif
 
 	if(asleep)
 	{
