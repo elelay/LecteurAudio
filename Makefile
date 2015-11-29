@@ -26,7 +26,7 @@ all: $(ALL)
 ifeq ($(strip $(RPI)),)
 la: emul.o
 else
-la: lcd.o magneto_arduino.o
+la: lcd.o magneto_arduino_serial.o
 endif
 
 la: main.o controles.o
