@@ -69,7 +69,7 @@ int la_init_controls(int** fdControls, int* fdControlCount)
 
     fArduino = fdopen(fdsArduino[0], "r");
 
-    buf_len = 8;
+    buf_len = 128;
     buf = malloc(buf_len);
     if(!buf)
     {
@@ -99,21 +99,24 @@ void la_wait_input()
 
 void la_leds_off()
 {
+	fprintf(stdout, "OFF\n");
+	//serialPuts(fdsArduino[0], "PI: HELLO\n");
+	//serialFlush(fdsArduino[0]);
 	serialPutchar (fdsArduino[0], 'J');
 	serialFlush(fdsArduino[0]);
 }
 
 void la_leds_on()
 {
-	serialPutchar (fdsArduino[0], 'N');
-	serialFlush(fdsArduino[0]);
+	//serialPutchar (fdsArduino[0], 'N');
+	//serialFlush(fdsArduino[0]);
 }
 
 int la_control_input_one(int fd)
 {
-	int val;
 	Control c;
 	int len;
+	const char* cmd;
 
 
 	len = getline(&buf, &buf_len, fArduino);
@@ -122,69 +125,56 @@ int la_control_input_one(int fd)
 		fprintf(stderr, "E: nothing read from arduino\n");
 		return -1;
 	}
-	else if(len != 8){
-		if(strstr(buf, "got ") != buf)
-		{
-			fprintf(stderr, "E: invalid read (%i) from arduino:%s\n", len, buf);
-			return 0;
-		}
-		else
-		{
-			return 1;
-		}
-	}
-
-	if(!strstr(buf, "PIN1 "))
+	else if(strstr(buf, "IR: ") != buf)
 	{
-		val = buf[5] - '0';
-	}
-	else if(!strstr(buf, "PIN2 "))
-	{
-		val = buf[5] - '0' + 5;
-	}
-	else
-	{
-		fprintf(stderr, "E: invalid line read from arduino: %s\n", buf);
-	}
-
-	if(val < 0 || val > 9)
-	{
-		fprintf(stderr, "E: invalid line read from arduino: %s\n", buf);
+		fprintf(stdout, "arduino: %s\n", buf);
 		return 0;
 	}
-	//printf("D: PIN %s\n",DEBUG_CODES[val]);
-
-	switch(val)
+	else if(buf[len - 1] != '\n')
 	{
-	case CODE_POWER:
-		c = LA_MENU;
-		break;
-
-	case CODE_PLAY:
+		fprintf(stdout, "arduino no endl: %s\n", buf);
+		return 0;
+	}
+	
+	buf[len - 2] = '\0';
+	cmd = buf + 4;
+	if(!strcmp("POWER", cmd))
+	{
 		c = LA_PLAYPAUSE;
-		break;
-
-	case CODE_UP:
+	}
+	else if(!strcmp("UP", cmd))
+	{
 		c = LA_UP;
-		break;
-
-	case CODE_DOWN:
-		c = LA_DOWN;
-		break;
-
-	case CODE_REW:
+	}
+	else if(!strcmp("SETUP", cmd))
+	{
+		c = LA_MENU;
+	}
+	else if(!strcmp("LEFT", cmd))
+	{
 		c = LA_LEFT;
-		break;
-
-	case CODE_FF:
-		c = LA_RIGHT;
-		break;
-
-	case CODE_REC:
+	}
+	else if(!strcmp("ENTER", cmd))
+	{
 		c = LA_OK;
-		break;
-
-	default:
+	}
+	else if(!strcmp("RIGHT", cmd))
+	{
+		c = LA_RIGHT;
+	}
+	else if(!strcmp("DOWN", cmd))
+	{
+		c = LA_DOWN;
+	}
+	//else if(!strcmp("VOL+", cmd))
+	//{
+	//}
+	//else if(!strcmp("VOL-", cmd))
+	//{
+	//}
+	else
+	{
+		fprintf(stderr, "unsupported command: '%s'\n", cmd);
 		return 0;
 	}
 
