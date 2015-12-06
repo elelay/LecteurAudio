@@ -12,7 +12,7 @@
 #include <errno.h>
 #include <string.h>
 
-#include <iconv.h>
+#include <iconv.h> 
 
 #include <wiringPi.h>
 #include <wiringSerial.h>
@@ -30,7 +30,6 @@ static iconv_t conv;
 static const size_t conv_buf_len = 64;
 static char conv_buf[64];
 static int saved_x = 0, saved_y = 0;
-static int sent_cmds = 0;
 
 typedef enum {
 	CODE__1,
@@ -123,23 +122,15 @@ int la_init_ecran()
 {
 	setlocale (LC_ALL, "");
 
-	conv = iconv_open("ISO-8859-1", "UTF-8");
-	if(conv == (iconv_t)(-1))
-	{
-		fprintf(stderr, "E: iconv init failed: %s\n", strerror(errno));
-	}
-	//la_lcdHome();
-	//la_lcdPuts("Lecteur Audio");
-	//usleep(5000000);
-	return 0;
-}
-
-void waitAck()
-{
-	while(sent_cmds > 1)
-	{
-		la_control_input_one(fdsArduino[0]);
-	}
+  	conv = iconv_open("ISO-8859-1", "UTF-8");
+  	if(conv == (iconv_t)(-1))
+  	{
+  		fprintf(stderr, "E: iconv init failed: %s\n", strerror(errno));
+  	}
+  	la_lcdHome();
+  	la_lcdPuts("HELLO WORLD123");
+  	//usleep(5000000);
+	return 1;
 }
 
 void la_lcdHome()
@@ -151,26 +142,29 @@ void la_lcdClear()
 {
 	fprintf(stdout,"D: sending PL\n");
 	serialPuts(fdsArduino[0], "PL\n");
-	sent_cmds++;
-	waitAck();
+	//serialFlush(fdsArduino[0]);
+	usleep(5000);
+	//NUGET getchar()
 }
 
 void la_lcdPosition(int col, int row)
 {
 	fprintf(stdout,"D: sending PG%02i%02i\n", col, row);
 	serialPrintf(fdsArduino[0], "PG%02i%02i\n", col, row);
+	//serialFlush(fdsArduino[0]);	
 	saved_x = col;
 	saved_y = row;
-	sent_cmds++;
-	waitAck();
+	usleep(5000);
+	//NUGET getchar()
 }
 
 void la_lcdPutChar(uint8_t c)
 {
 	fprintf(stdout,"D: sending PC%c\n", c);
-	waitAck();
 	serialPrintf(fdsArduino[0], "PC%c\n", c);
-	sent_cmds++;
+	//serialFlush(fdsArduino[0]);	
+	usleep(5000);
+	//NUGET getchar()
 }
 
 static void tr(char* str)
@@ -191,7 +185,7 @@ static void tr(char* str)
 			case (char)230:
 				str[i] = 'a';
 				break;
-
+			
 			case (char)231:
 				str[i] = 235;
 				break;
@@ -213,6 +207,8 @@ void la_lcdPuts(char* str)
 	char* output = conv_buf;
 	size_t output_len = conv_buf_len;
 	size_t stop;
+	int i;
+	char c;
 
 	len = iconv(conv, &inbuf, &inbuflen, &output, &output_len);
 	if(len == -1)
@@ -226,11 +222,38 @@ void la_lcdPuts(char* str)
 		conv_buf[stop] = '\0';
 		tr(conv_buf);
 		printf("D: %s|%s\n", str, conv_buf);
+		//len = strlen(conv_buf);
+		//for(i=0;i<len; i+=9)
+		//{
+		//if(i>0)
+		//{
+		//	conv_buf[i] = c;
+		//}
+			
+		//if(i + 9 <len){
+		//	c = conv_buf[i+9];
+		//	conv_buf[i+9]=0;
+		//}
+			
+		//printf("D: sending PI:PS:%s\n", conv_buf+i);
+		//serialPrintf(fdsArduino[0], "PI:PS:%s\n", conv_buf+i);
+		//serialFlush(fdsArduino[0]);
+		////NUGET getchar()
+		// //usleep(10000);
+		//}
+		//usleep(500000);
+		//for(i=0;i<strlen(conv_buf);i++)
+		//{
+		//	la_lcdPutChar(conv_buf[i]);
+		//}
+		//usleep(500000);
 		printf("D: sending PS%s\n", conv_buf);
 		serialPrintf(fdsArduino[0], "PS%s\n", conv_buf);
-		sent_cmds++;
-		waitAck();
+		//serialFlush(fdsArduino[0]);
+		usleep(5000);
 	}
+	//NUGET getchar()
+	
 }
 
 void la_ecran_change_state(bool sleep)
@@ -251,12 +274,6 @@ int la_control_input_one(int fd)
 		fprintf(stderr, "E: nothing read from arduino\n");
 		return -1;
 	}
-	else if(strstr(buf, "ACK") == buf)
-	{
-		fprintf(stdout, "arduino: %s\n", buf);
-		sent_cmds = 0;
-		return 1;
-	}
 	else if(strstr(buf, "IR: ") != buf)
 	{
 		fprintf(stdout, "arduino: %s\n", buf);
@@ -266,51 +283,9 @@ int la_control_input_one(int fd)
 	{
 		fprintf(stdout, "arduino no endl: %s\n", buf);
 		return 0;
-	}
-	fprintf(stdout, "IR: %s\n", buf);
-
-	buf[len - 2] = '\0';
-	cmd = buf + 4;
-	if(!strcmp("POWER", cmd))
+	}else
 	{
-		c = LA_PLAYPAUSE;
-	}
-	else if(!strcmp("UP", cmd))
-	{
-		c = LA_UP;
-	}
-	else if(!strcmp("SETUP", cmd))
-	{
-		c = LA_MENU;
-	}
-	else if(!strcmp("LEFT", cmd))
-	{
-		c = LA_LEFT;
-	}
-	else if(!strcmp("ENTER", cmd))
-	{
-		c = LA_OK;
-	}
-	else if(!strcmp("RIGHT", cmd))
-	{
-		c = LA_RIGHT;
-	}
-	else if(!strcmp("DOWN", cmd))
-	{
-		c = LA_DOWN;
-	}
-	else if(!strcmp("STOP", cmd))
-	{
-		c = LA_STOP;
-	}
-	else if(!strcmp("EXIT", cmd))
-	{
-		c = LA_EXIT;
-	}
-	else
-	{
-		fprintf(stderr, "unsupported command: '%s'\n", cmd);
-		return 0;
+		fprintf(stdout, "%s", buf);
 	}
 
 	if(callbacks[c] != NULL)
@@ -322,4 +297,55 @@ int la_control_input_one(int fd)
 
 void la_exit()
 {
+}
+
+int main()
+{
+	int fdControlCount;
+	int* fdControls;
+	int ret;
+	int avail;
+	int len;
+	
+	printf("HELLO WORLD\n");
+
+	int play_ok = 0;
+	int i;
+
+	if(la_init_controls(&fdControls, &fdControlCount))
+	{
+		fprintf(stderr, "E: init controls\n");
+		return -1;
+	}
+
+	if(la_init_ecran())
+	{
+		la_lcdHome();
+		la_lcdPutChar('S');
+		la_lcdPutChar('A');
+	}
+
+	while(1)
+	{
+		avail = serialDataAvail(fdsArduino[0]);
+		if(avail > 0)
+		{
+		la_control_input_one(fdsArduino[0]);
+		}
+		
+		avail = serialDataAvail(0);
+		while(avail > 0)
+		{
+			fprintf(stdout, "GOT %i\n", avail);
+			len = getline(&buf, &buf_len, stdin);
+			if(len>0)
+			{
+				fprintf(stdout, "%s",buf);
+			}
+			serialPuts(fdsArduino[0], buf);
+			avail-=len;
+		}
+		usleep(5000);
+	}
+	return 0;
 }

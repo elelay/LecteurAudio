@@ -11,13 +11,14 @@ INC:=
 LINK:=-lncurses -lcurl
 endif
 
-ALL:=la leds_on_off
+ALL:=la leds_on_off sb
 
 CFLAGS:=-Wall $(INC) -g
 # alarmpi
 # LDFLAGS:=-lmpdclient -lrt $(LINK)
 # raspbian
 LDFLAGS:=-L/opt/libmpdclient210/lib -Wl,-rpath -Wl,/opt/libmpdclient210/lib -lmpdclient -lrt $(LINK)
+LDFLAGS_LIGHT:= -lwiringPi -lwiringPiDev
 
 .PHONY: all clean
 
@@ -26,7 +27,7 @@ all: $(ALL)
 ifeq ($(strip $(RPI)),)
 la: emul.o
 else
-la: lcd.o magneto_arduino_serial.o
+la: magneto_arduino_serial.o
 endif
 
 la: main.o controles.o
@@ -36,6 +37,9 @@ main.o: controles.h ecran.h
 
 leds_on_off: leds_on_off.o
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $<
+
+sb: serial_bridge.o
+	$(CC) $(CFLAGS) $(LDFLAGS_LIGHT) -o $@ $<
 
 clean:
 	rm -f la *.o

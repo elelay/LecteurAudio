@@ -2,7 +2,7 @@
 #define CONTROLES_H
 
 typedef enum {
-	LA_PLAYPAUSE, LA_UP, LA_DOWN, LA_LEFT, LA_RIGHT, LA_MENU, LA_OK, LA_CONTROL_LENGTH
+	LA_PLAYPAUSE, LA_UP, LA_DOWN, LA_LEFT, LA_RIGHT, LA_MENU, LA_OK, LA_STOP, LA_EXIT, LA_CONTROL_LENGTH
 } Control;
 
 typedef int (*Callback)(Control control, void* param);

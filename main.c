@@ -112,6 +112,7 @@ volatile sig_atomic_t sleep_flag = 0;
 #define LOG_ERROR(x, ...) \
 {\
 	fprintf(stderr, x, __VA_ARGS__);\
+	fflush(stderr);\
 	snprintf(log_buffer,16, x, __VA_ARGS__);\
 	la_lcdPosition(0,0);\
 	la_lcdPuts(log_buffer);\
@@ -421,7 +422,6 @@ print_status(struct mpd_connection *conn)
 static bool
 is_stream_in_queue(struct mpd_connection* conn)
 {
-	struct mpd_status *status;
 	struct mpd_song *song;
 	char *value;
 	bool ret = false;
@@ -766,8 +766,8 @@ sigrt_handler(int sig, siginfo_t *si, void *uc)
 static void
 setup_timers()
 {
-	struct sigevent sevp = {0};
-	struct sigaction sa = {0};
+	struct sigevent sevp = {{0}};
+	struct sigaction sa = {{0}};
 	sigset_t mask;
 
 	// signal
@@ -1399,6 +1399,45 @@ do_shutdown(struct mpd_connection* conn)
 }
 
 static int
+do_stop(Control ctrl, struct mpd_connection* conn)
+{
+	struct mpd_status *status;
+	CHECK_CONNECTION(conn);
+	mpd_run_noidle(conn);
+
+	status = mpd_run_status(conn);
+	if (!status) {
+		LOG_ERROR("%s", mpd_connection_get_error_message(conn));
+		return -1;
+	}
+	mpd_response_finish(conn);
+	CHECK_CONNECTION(conn);
+
+	switch (mpd_status_get_state(status)){
+	case MPD_STATE_STOP:
+		break;
+	case MPD_STATE_PLAY:
+	case MPD_STATE_PAUSE:
+		mpd_run_stop(conn);
+		break;
+	default:
+		fprintf(stderr, "E: do_stop unknown mpd status\n");
+	}
+	CHECK_CONNECTION(conn);
+
+	mpd_status_free(status);
+
+	la_lcdHome();
+	la_lcdPuts("    MPD STOPPED    ");
+	if(!mpd_send_idle(conn))
+	{
+		LOG_ERROR("Unable to put mpd in idle mode%s\n","");
+		return -1;
+	}
+	return 0;
+}
+
+static int
 do_internet_status()
 {
 	CURL *curl;
@@ -1496,7 +1535,7 @@ run()
 	int mpd_fd;
 	int fdControlCount;
 	int* fdControls;
-	int play_ok = 0;
+	int play_ok = 1; // mettre à 0 pour reprendre
 	int i;
 
 	if(la_init_controls(&fdControls, &fdControlCount))
@@ -1505,10 +1544,11 @@ run()
 		return -1;
 	}
 
-	la_init_ecran();
-	la_lcdHome();
-	la_lcdPutChar('H');
-	la_lcdPutChar('E');
+	if(la_init_ecran())
+	{
+		fprintf(stderr, "E: init ecran\n");
+		return -1;
+	}
 
 	if(connect_to_mpd(&conn)){
 		la_exit();
@@ -1526,6 +1566,8 @@ run()
 	la_on_key(LA_LEFT, (Callback)do_left, conn);
 	la_on_key(LA_RIGHT, (Callback)do_right, conn);
 	la_on_key(LA_OK, (Callback)do_ok, conn);
+	la_on_key(LA_STOP, (Callback)do_stop, conn);
+	la_on_key(LA_EXIT, (Callback)do_stop, conn);
 
 	if(is_stream_in_queue(conn))
 	{
@@ -1615,7 +1657,7 @@ run_in_background()
 						perror("E: unable to get time after run");
 						return -1;
 					}
-					
+
 					if((after.tv_sec - before.tv_sec) < 60)
 					{
 						keep_running = false;
