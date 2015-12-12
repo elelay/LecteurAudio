@@ -52,7 +52,7 @@
 //#define CONFIG_SLEEP 1
 
 typedef enum {
-	LA_STATE_PLAYING, LA_STATE_MENU, LA_STATE_LIST, LA_STATE_ADD_REPLACE, LA_STATE_VOLUME, LA_STATE_SETTINGS, LA_STATE_RADIO
+	LA_STATE_PLAYING, LA_STATE_MENU, LA_STATE_RESUME, LA_STATE_LIST, LA_STATE_ADD_REPLACE, LA_STATE_VOLUME, LA_STATE_SETTINGS, LA_STATE_RADIO
 } LaState;
 
 static void print_list();
@@ -76,6 +76,7 @@ int state_list;
 char* state_list_path;
 int state_list_dir_index;
 int state_list_rl_offset;
+int* resume_played;
 
 #define LIST_RADIOS_LEN 2
 const char* list_radios[LIST_RADIOS_LEN] = {
@@ -465,77 +466,46 @@ mk_string_list()
 	return tmp;
 }
 
-// static int
-// fetch_and_print_list_artists(struct mpd_connection *conn)
-// {
-// 	struct mpd_pair *pair;
-// 	StringList *buf, *tmp, *cur;
-// 	char** tmpl;
-// 	int tmp_len,tmp_list_len;
+typedef struct IntList {
+	int value;
+	struct IntList* next;
+} IntList;
 
-// 	tmp_len = 0;
-// 	cur = NULL;
+static IntList*
+mk_int_list()
+{
+	IntList *tmp;
+	tmp = calloc(1, sizeof(IntList));
+	if(tmp == NULL){
+		LOG_ERROR("E: %s", "calloc");
+		exit(-1);
+	}
+	return tmp;
+}
 
-//  	CHECK_CONNECTION(conn);
-//  	mpd_run_noidle(conn);
+static char*
+get_filename_from_uri(char* uri)
+{
+	char* value;
 
-// 	mpd_search_db_tags(conn, MPD_TAG_ARTIST);
-// 	mpd_search_commit(conn);
-// 	CHECK_CONNECTION(conn);
+	value = strrchr(uri, '/');
 
-// 	tmp_len = 0;
-// 	while ((pair = mpd_recv_pair_tag(conn, MPD_TAG_ARTIST)) != NULL) {
-// 		if (cur == NULL)
-// 		{
-// 			buf = tmp = mk_string_list();
-// 			tmp->value = strdup(pair->value);
-// 		}
-// 		else
-// 		{
-// 			tmp = mk_string_list();
-// 			tmp->value = strdup(pair->value);
-// 			cur->next = tmp;
-// 		}
-// 		cur = tmp;
-// 		tmp_len++;
-// 		mpd_return_pair(conn, pair);
-// 	}
+	if(value == NULL)
+	{
+		value = uri;
+	}
+	else
+	{
+		value++;
+	}
 
-// 	mpd_response_finish(conn);
-// 	CHECK_CONNECTION(conn);
-
-// 	tmp_list_len = list_length;
-// 	list_length = 0;
-// 	for(tmpl = list_contents; tmp_list_len != 0; tmpl++)
-// 	{
-// 		free(*tmpl);
-// 		tmp_list_len--;
-// 	}
-// 	free(list_contents);
-
-// 	list_contents = calloc(tmp_len, sizeof(char*));
-// 	cur = buf;
-// 	for(tmpl = list_contents; cur != NULL; tmpl++)
-// 	{
-// 		*tmpl = cur->value;
-// 		tmp = cur;
-// 		cur = cur->next;
-// 		free(tmp);
-// 	}
-// 	list_length = tmp_len;
-
-// 	state_list = 0;
-// 	state_list_rl_offset = 0;
-// 	print_list();
-
-// 	return 0;
-// }
+	return value;
+}
 
 static char*
 la_mpd_song_get_filename(const struct mpd_song* song)
 {
 	char* value;
-	char* tmp;
 	if((value = (char*)mpd_song_get_tag(song, MPD_TAG_TITLE, 0)) == NULL)
 	{
 		if((value = (char*)mpd_song_get_uri(song)) == NULL)
@@ -544,15 +514,44 @@ la_mpd_song_get_filename(const struct mpd_song* song)
 		}
 		else
 		{
-			tmp = strrchr(value, '/');
-			if(tmp != NULL)
-			{
-				value = tmp+1;
-			}
+			value = get_filename_from_uri(value);
 		}
 	}
 	return strdup(value);
 }
+
+static char*
+format_resume_label(char* uri, int played)
+{
+	char* filename;
+	char* buf;
+	size_t len;
+	int ret;
+
+	filename = get_filename_from_uri(uri);
+
+	len = strlen(filename)+1+3*(2+1)+1;
+	buf = malloc(len);
+
+	if(buf == NULL)
+	{
+		perror("format_resume_label allocate buf");
+		return NULL;
+	}
+
+	ret = snprintf(buf, len, "%s %02i:%02i:%02i", filename, played / 3600, (played % 3600) / 60, played % 60);
+
+	if(ret > 0)
+	{
+		return buf;
+	}
+	else
+	{
+		free(buf);
+		return NULL;
+	}
+}
+
 
 static void
 free_list_state()
@@ -727,6 +726,167 @@ fetch_and_print_list_radio()
 
 	state_list = 0;
 	state_list_rl_offset = 0;
+	print_list();
+
+	return 0;
+}
+
+
+static int
+fetch_and_print_resume(struct mpd_connection *conn)
+{
+	StringList *buf, *tmp, *cur, *buf_fns, *cur_fns, *tmp_fns;
+	IntList *buf_int, *tmp_int, *cur_int;
+	char **tmpl;
+	int tmp_len;
+	struct mpd_pair* pair;
+	const char *sticker_value;
+	char *uri, *value;
+	int played;
+	size_t name_len;
+	int* tmpli;
+	struct mpd_entity* entity;
+	const struct mpd_song* song;
+
+	tmp_len = 0;
+	cur_int = NULL;
+	cur_fns = NULL;
+	cur = NULL;
+
+ 	CHECK_CONNECTION(conn);
+ 	mpd_run_noidle(conn);
+
+ 	mpd_send_sticker_find(conn, "song", "", "played");
+	CHECK_CONNECTION(conn);
+
+	tmp_len = 0;
+	while((pair = mpd_recv_pair(conn)) != NULL)
+	{
+		if(!strcmp(pair->name, "file"))
+		{
+			uri=strdup(pair->value);
+		}
+		else
+		{
+			sticker_value=mpd_parse_sticker(pair->value, &name_len);
+			if(sticker_value)
+			{
+				played=atoi(sticker_value);
+
+				tmp_fns = mk_string_list();
+				tmp_fns->value = uri;
+				tmp_int = mk_int_list();
+				tmp_int->value = played;
+
+				if (cur_fns == NULL)
+				{
+					buf_fns = tmp_fns;
+					buf_int = tmp_int;
+				}
+				else
+				{
+					cur_fns->next = tmp_fns;
+					cur_int->next = tmp_int;
+				}
+				cur_fns = tmp_fns;
+				cur_int = tmp_int;
+				tmp_len++;
+			}
+			else
+			{
+				//TODO: error
+			}
+		}
+		mpd_return_pair(conn, pair);
+	}
+
+	mpd_response_finish(conn);
+	CHECK_CONNECTION(conn);
+
+	if(tmp_len == 0)
+	{
+		buf = NULL;
+	}
+	else
+	{
+		printf("D: resume length %i\n", tmp_len);
+		for(cur_fns=buf_fns, cur_int = buf_int; cur_fns != NULL; cur_fns = cur_fns->next, cur_int = cur_int->next)
+		{
+			mpd_send_list_meta(conn, cur_fns->value);
+			CHECK_CONNECTION(conn);
+
+			while((entity = mpd_recv_entity(conn)) != NULL)
+			{
+				if(mpd_entity_get_type(entity)  ==  MPD_ENTITY_TYPE_SONG)
+				{
+					song = mpd_entity_get_song(entity);
+					value = la_mpd_song_get_filename(song);
+
+					tmp = mk_string_list();
+					tmp->value = format_resume_label(value, cur_int->value);
+					printf("D: resume %s\n", tmp->value);
+
+					if (cur == NULL)
+					{
+						buf = tmp;
+					}
+					else
+					{
+						cur->next = tmp;
+					}
+					cur = tmp;
+				}
+				mpd_entity_free(entity);
+			}
+
+			mpd_response_finish(conn);
+			CHECK_CONNECTION(conn);
+		}
+	}
+
+	if(!mpd_send_idle(conn))
+	{
+		LOG_ERROR("Unable to put mpd in idle mode%s\n","");
+		return -1;
+	}
+
+	list_length = 0;
+	free_list_state();
+	free(resume_played);
+
+	list_contents = calloc(tmp_len, sizeof(char*));
+	cur = buf;
+	for(tmpl = list_contents; cur != NULL; tmpl++)
+	{
+		*tmpl = cur->value;
+		tmp = cur;
+		cur = cur->next;
+		free(tmp);
+	}
+	resume_played = calloc(tmp_len, sizeof(int));
+	cur_int = buf_int;
+	for(tmpli = resume_played; cur_int != NULL; tmpli++)
+	{
+		*tmpli = cur_int->value;
+		tmp_int = cur_int;
+		cur_int = cur_int->next;
+		free(tmp_int);
+	}
+	list_uris = calloc(tmp_len, sizeof(char*));
+	cur = buf_fns;
+	for(tmpl = list_uris; cur != NULL; tmpl++)
+	{
+		*tmpl = cur->value;
+		tmp = cur;
+		cur = cur->next;
+		free(tmp);
+	}
+
+	list_length = tmp_len;
+
+	state_list = 0;
+	state_list_rl_offset = 0;
+	state_list_path = NULL;
 	print_list();
 
 	return 0;
@@ -1028,8 +1188,9 @@ static int do_sleep(struct mpd_connection* conn)
 	return 0;
 }
 
-#define MENU_LENGTH 5
+#define MENU_LENGTH 6
 static char* menu_contents[MENU_LENGTH] = {
+	"Resume...",
 	"List...",
 	"Volume...",
 	"Radio...",
@@ -1320,19 +1481,22 @@ do_ok(Control ctrl, struct mpd_connection* conn)
 		{
 		case 0:
 			state = LA_STATE_LIST;
-			return fetch_and_print_list(conn, NULL);
+			return fetch_and_print_resume(conn);
 		case 1:
+			state = LA_STATE_LIST;
+			return fetch_and_print_list(conn, NULL);
+		case 2:
 			state = LA_STATE_VOLUME;
 			return fetch_and_print_volume(conn);
-		case 2:
+		case 3:
 			state = LA_STATE_RADIO;
 			return fetch_and_print_list_radio();
-		case 3:
+		case 4:
 			state  = LA_STATE_SETTINGS;
 			state_settings = 0;
 			print_settings();
 			break;
-		case 4:
+		case 5:
 			return do_shutdown(conn);
 		default:
 			break;
