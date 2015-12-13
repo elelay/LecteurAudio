@@ -55,7 +55,7 @@ typedef enum {
 	LA_STATE_PLAYING, LA_STATE_MENU, LA_STATE_RESUME, LA_STATE_LIST, LA_STATE_ADD_REPLACE, LA_STATE_VOLUME, LA_STATE_SETTINGS, LA_STATE_RADIO
 } LaState;
 
-static void print_list();
+static void print_list(int old_state_list);
 static void print_settings();
 static int do_shutdown(struct mpd_connection *conn);
 static int print_status(struct mpd_connection *conn);
@@ -63,6 +63,9 @@ static int do_sleep(struct mpd_connection* conn);
 static int do_wifi_status();
 static void free_list_state();
 static int reconnect_to_mpd(struct mpd_connection **conn);
+static int do_update_played(struct mpd_connection *conn);
+static int do_play(struct mpd_connection* conn);
+
 
 LaState state;
 
@@ -77,6 +80,7 @@ char* state_list_path;
 int state_list_dir_index;
 int state_list_rl_offset;
 int* resume_played;
+bool ignore_next_idle;
 
 #define LIST_RADIOS_LEN 2
 const char* list_radios[LIST_RADIOS_LEN] = {
@@ -176,23 +180,42 @@ connect_to_mpd(struct mpd_connection **conn)
 }
 
 static int
+do_clear_current(struct mpd_connection* conn)
+{
+	if(do_update_played(conn))
+	{
+		LOG_ERROR("%s", mpd_connection_get_error_message(conn));
+		return -1;
+	}
+
+	printf("D: do_clear_current\n");
+	if(!mpd_run_clear(conn))
+	{
+		LOG_ERROR("%s", mpd_connection_get_error_message(conn));
+		return -1;
+	}
+	printf("D: do_clear_current end\n");
+
+	return 0;
+}
+
+static int
 do_replace_playing_with_selected(struct mpd_connection* conn, bool replace)
 {
 	char* file = list_uris[state_list];
 
 	printf("D: switch to %s\n", file);
 
- 	CHECK_CONNECTION(conn);
- 	mpd_run_noidle(conn);
+	CHECK_CONNECTION(conn);
+	mpd_run_noidle(conn);
 
- 	if(replace)
- 	{
- 		if(!mpd_run_clear(conn))
- 		{
-			LOG_ERROR("%s", mpd_connection_get_error_message(conn));
+	if(replace)
+	{
+		if(do_clear_current(conn))
+		{
 			return -1;
- 		}
- 	}
+		}
+	}
 
 	if(!mpd_run_add(conn, file))
 	{
@@ -200,14 +223,55 @@ do_replace_playing_with_selected(struct mpd_connection* conn, bool replace)
 		return -1;
 	}
 
-	if(!mpd_run_play(conn))
+	if(do_play(conn))
 	{
 		LOG_ERROR("%s", mpd_connection_get_error_message(conn));
 		return -1;
 	}
 
-	state = LA_STATE_PLAYING;
-	print_status(conn);
+	if(!mpd_send_idle(conn))
+	{
+		LOG_ERROR("Unable to put mpd in idle mode%s\n","");
+		return -1;
+	}
+
+	return 0;
+}
+
+static int
+do_resume_selected(struct mpd_connection* conn)
+{
+	char* file = list_uris[state_list];
+	int played = resume_played[state_list];
+
+	printf("D: switch to %s at %i\n", file, played);
+
+	CHECK_CONNECTION(conn);
+	mpd_run_noidle(conn);
+
+	if(do_clear_current(conn))
+	{
+		LOG_ERROR("do_resume_selected %s failed\n", "do_clear_current");
+		return -1;
+	}
+
+	if(!mpd_run_add(conn, file))
+	{
+		LOG_ERROR("do_resume_selected %s", mpd_connection_get_error_message(conn));
+		return -1;
+	}
+
+	if(!mpd_run_seek_pos(conn, 0, played))
+	{
+		LOG_ERROR("do_resume_selected %s", mpd_connection_get_error_message(conn));
+		return -1;
+	}
+
+	if(do_play(conn))
+	{
+		LOG_ERROR("do_resume_selected %s", mpd_connection_get_error_message(conn));
+		return -1;
+	}
 
 	if(!mpd_send_idle(conn))
 	{
@@ -225,8 +289,8 @@ fetch_and_print_volume(struct mpd_connection *conn)
 	int volume;
 
 
- 	CHECK_CONNECTION(conn);
- 	mpd_run_noidle(conn);
+	CHECK_CONNECTION(conn);
+	mpd_run_noidle(conn);
 
 	status = mpd_run_status(conn);
 	if (!status) {
@@ -269,11 +333,11 @@ do_change_volume(struct mpd_connection *conn, int inc, bool set)
 	struct mpd_status *status;
 	int volume;
 
- 	CHECK_CONNECTION(conn);
- 	mpd_run_noidle(conn);
+	CHECK_CONNECTION(conn);
+	mpd_run_noidle(conn);
 
- 	if(set)
- 	{
+	if(set)
+	{
 		if(!mpd_run_set_volume(conn, inc))
 		{
 			LOG_ERROR("Unable to set volume to %i\n",inc);
@@ -289,7 +353,7 @@ do_change_volume(struct mpd_connection *conn, int inc, bool set)
 		}
 	}
 
- 	status = mpd_run_status(conn);
+	status = mpd_run_status(conn);
 	if (!status) {
 		LOG_ERROR("%s", mpd_connection_get_error_message(conn));
 		return -1;
@@ -416,6 +480,69 @@ print_status(struct mpd_connection *conn)
 
 	mpd_response_finish(conn);
 	CHECK_CONNECTION(conn);
+
+	return 0;
+}
+
+static int
+do_update_played(struct mpd_connection *conn)
+{
+	struct mpd_status *status;
+	struct mpd_song *song;
+	const char *value;
+	char* tmp;
+	char* uri;
+	int played;
+
+	uri = NULL;
+
+	song = mpd_run_current_song(conn);
+	if (song == NULL)
+	{
+		printf("D: do_update_played no current song\n");
+	}
+	else
+	{
+		if((value = mpd_song_get_uri(song)) != NULL)
+		{
+			if(strstr(value, "http://") != value)
+			{
+				uri = strdup(value);
+			}
+		}
+
+		mpd_song_free(song);
+	}
+
+	mpd_response_finish(conn);
+
+	status = mpd_run_status(conn);
+	if (!status) {
+		LOG_ERROR("%s", mpd_connection_get_error_message(conn));
+		return -1;
+	}
+
+	played = mpd_status_get_elapsed_time(status);
+	mpd_status_free(status);
+
+	mpd_response_finish(conn);
+	CHECK_CONNECTION(conn);
+
+	if(uri)
+	{
+		tmp = malloc(10);
+		snprintf(tmp, 10, "%i", played);
+
+		printf("D: saving sticker played %s = %i\n", uri, played);
+
+		if(!mpd_run_sticker_set(conn, "song", uri, "played", tmp))
+		{
+			LOG_ERROR("%s", mpd_connection_get_error_message(conn));
+			return -1;
+		}
+
+		free(tmp);
+	}
 
 	return 0;
 }
@@ -576,7 +703,7 @@ free_list_state()
 }
 
 static int
-fetch_and_print_list(struct mpd_connection *conn, char* path)
+fetch_list(struct mpd_connection *conn, char* path)
 {
 	StringList *buf, *tmp, *cur, *fns, *cur_fns, *tmp_fns;
 	char **tmpl;
@@ -589,18 +716,18 @@ fetch_and_print_list(struct mpd_connection *conn, char* path)
 	tmp_len = 0;
 	cur = NULL;
 
- 	CHECK_CONNECTION(conn);
- 	mpd_run_noidle(conn);
+	CHECK_CONNECTION(conn);
+	mpd_run_noidle(conn);
 
- 	if(path == NULL)
- 	{
- 		mpd_send_list_meta(conn, "/");
- 	}
- 	else
- 	{
- 		printf("D: fetch_and_print_list(%s)\n", path);
- 		mpd_send_list_meta(conn, path);
- 	}
+	if(path == NULL)
+	{
+		mpd_send_list_meta(conn, "/");
+	}
+	else
+	{
+		printf("D: fetch_list(%s)\n", path);
+		mpd_send_list_meta(conn, path);
+	}
 
 	CHECK_CONNECTION(conn);
 
@@ -701,12 +828,22 @@ fetch_and_print_list(struct mpd_connection *conn, char* path)
 	state_list = 0;
 	state_list_rl_offset = 0;
 	state_list_path = path;
-	print_list();
 
 	return 0;
 }
 
-
+static int
+fetch_and_print_list(struct mpd_connection *conn, char* path)
+{
+	int ret;
+	ret = fetch_list(conn, path);
+	if(ret) return ret;
+	else
+	{
+		print_list(-1);
+		return 0;
+	}
+}
 
 static int
 fetch_and_print_list_radio()
@@ -726,14 +863,14 @@ fetch_and_print_list_radio()
 
 	state_list = 0;
 	state_list_rl_offset = 0;
-	print_list();
+	print_list(-1);
 
 	return 0;
 }
 
 
 static int
-fetch_and_print_resume(struct mpd_connection *conn)
+fetch_resume(struct mpd_connection *conn)
 {
 	StringList *buf, *tmp, *cur, *buf_fns, *cur_fns, *tmp_fns;
 	IntList *buf_int, *tmp_int, *cur_int;
@@ -753,10 +890,10 @@ fetch_and_print_resume(struct mpd_connection *conn)
 	cur_fns = NULL;
 	cur = NULL;
 
- 	CHECK_CONNECTION(conn);
- 	mpd_run_noidle(conn);
+	CHECK_CONNECTION(conn);
+	mpd_run_noidle(conn);
 
- 	mpd_send_sticker_find(conn, "song", "", "played");
+	mpd_send_sticker_find(conn, "song", "", "played");
 	CHECK_CONNECTION(conn);
 
 	tmp_len = 0;
@@ -794,7 +931,8 @@ fetch_and_print_resume(struct mpd_connection *conn)
 			}
 			else
 			{
-				//TODO: error
+				fprintf(stderr, "E: parsing sticker %s\n", pair->value);
+				return -1;
 			}
 		}
 		mpd_return_pair(conn, pair);
@@ -887,9 +1025,21 @@ fetch_and_print_resume(struct mpd_connection *conn)
 	state_list = 0;
 	state_list_rl_offset = 0;
 	state_list_path = NULL;
-	print_list();
 
 	return 0;
+}
+
+static int
+fetch_and_print_resume(struct mpd_connection *conn)
+{
+	int ret;
+	ret = fetch_resume(conn);
+	if(ret) return ret;
+	else
+	{
+		print_list(-1);
+		return 0;
+	}
 }
 
 static int
@@ -1094,7 +1244,16 @@ static void wait_input_async(struct mpd_connection* conn, int mpd_fd, int* contr
 				{
 					if(mpd_recv_idle(conn, false))
 					{
-						print_status(conn);
+						if(ignore_next_idle)
+						{
+							printf("D: recv_idle IGNORE status\n");
+							ignore_next_idle = false;
+						}
+						else
+						{
+							printf("D: recv_idle => status\n");
+							print_status(conn);
+						}
 					}
 					if(!mpd_send_idle(conn))
 					{
@@ -1120,23 +1279,43 @@ static void wait_input_async(struct mpd_connection* conn, int mpd_fd, int* contr
 	}
 }
 
-static int do_play(struct mpd_connection* conn){
+static int
+do_play(struct mpd_connection* conn)
+{
 
- 	CHECK_CONNECTION(conn);
+	CHECK_CONNECTION(conn);
 
 	mpd_run_play(conn);
- 	CHECK_CONNECTION(conn);
+	CHECK_CONNECTION(conn);
 
+	state = LA_STATE_PLAYING;
+
+	if(do_update_played(conn))
+	{
+		return -1;
+	}
+
+	printf("D: do_play => status\n");
 	print_status(conn);
+	ignore_next_idle = true;
 
 	return 0;
 }
 
-static int do_playpause(Control ctrl, struct mpd_connection* conn){
+static int
+do_playpause(Control ctrl, struct mpd_connection* conn)
+{
 	struct mpd_status *status;
 
- 	CHECK_CONNECTION(conn);
- 	mpd_run_noidle(conn);
+	CHECK_CONNECTION(conn);
+	mpd_run_noidle(conn);
+
+
+	if(do_update_played(conn))
+	{
+		LOG_ERROR("do_playpause %s failed\n", "do_update_played");
+		return -1;
+	}
 
 	status = mpd_run_status(conn);
 	if (!status) {
@@ -1144,7 +1323,7 @@ static int do_playpause(Control ctrl, struct mpd_connection* conn){
 		return -1;
 	}
 	mpd_response_finish(conn);
- 	CHECK_CONNECTION(conn);
+	CHECK_CONNECTION(conn);
 
 	switch (mpd_status_get_state(status)){
 	case MPD_STATE_STOP:
@@ -1157,13 +1336,15 @@ static int do_playpause(Control ctrl, struct mpd_connection* conn){
 	default:
 		fprintf(stderr, "E: unknown mpd status\n");
 	}
- 	CHECK_CONNECTION(conn);
+	CHECK_CONNECTION(conn);
 
 	mpd_status_free(status);
 
 	if(state == LA_STATE_PLAYING)
- 	{
+	{
+		printf("D: do_playpause => status\n");
 		print_status(conn);
+		ignore_next_idle = true;
 	}
 	if(!mpd_send_idle(conn))
 	{
@@ -1173,12 +1354,20 @@ static int do_playpause(Control ctrl, struct mpd_connection* conn){
 	return 0;
 }
 
-static int do_sleep(struct mpd_connection* conn)
+static int
+do_sleep(struct mpd_connection* conn)
 {
 	CHECK_CONNECTION(conn);
 	mpd_run_noidle(conn);
+	CHECK_CONNECTION(conn);
 	mpd_run_pause(conn, true);
 	CHECK_CONNECTION(conn);
+
+	if(do_update_played(conn))
+	{
+		LOG_ERROR("%s", mpd_connection_get_error_message(conn));
+		return -1;
+	}
 
 	if(!mpd_send_idle(conn))
 	{
@@ -1199,29 +1388,67 @@ static char* menu_contents[MENU_LENGTH] = {
 };
 
 static void
-print_menu()
+print_menu(int old_state_menu)
 {
-	la_lcdClear();
-	la_lcdHome();
-	la_lcdPutChar('>');
-	la_lcdPosition(2, 0);
-	la_lcdPuts(menu_contents[state_menu]);
-	la_lcdPosition(2, 1);
-	la_lcdPuts(menu_contents[(state_menu+1)%MENU_LENGTH]);
+	bool need_full_refresh;
+
+	need_full_refresh = (old_state_menu == -1)
+						|| (old_state_menu / 2 != state_menu / 2);
+	if(need_full_refresh)
+	{
+		la_lcdClear();
+		la_lcdHome();
+		la_lcdPutChar('>');
+		la_lcdPosition(2, 0);
+		la_lcdPuts(menu_contents[state_menu]);
+		la_lcdPosition(2, 1);
+		la_lcdPuts(menu_contents[(state_menu+1)%MENU_LENGTH]);
+	}
+	else
+	{
+		la_lcdPosition(0, old_state_menu%2);
+		la_lcdPutChar(' ');
+		la_lcdPosition(0, state_menu%2);
+		la_lcdPutChar('>');
+	}
 }
 
 static void
-print_list()
+print_list(int old_state_list)
 {
-	la_lcdClear();
-	la_lcdHome();
-	la_lcdPutChar('>');
-	la_lcdPosition(2, 0);
-	la_lcdPuts(list_contents[state_list]+state_list_rl_offset);
-	la_lcdPosition(2, 1);
-	if(list_length > 1)
+	bool need_full_refresh;
+
+	if(old_state_list == -2)
 	{
-		la_lcdPuts(list_contents[(state_list+1)%list_length]);
+		la_lcdPosition(2, state_list%2);
+		la_lcdPuts("                ");
+		la_lcdPosition(2, state_list%2);
+		la_lcdPuts(list_contents[state_list]+state_list_rl_offset);
+	}
+	else
+	{
+		need_full_refresh = (old_state_list == -1)
+							|| (old_state_list / 2 != state_list / 2);
+		if(need_full_refresh)
+		{
+			la_lcdClear();
+			la_lcdHome();
+			la_lcdPutChar('>');
+			la_lcdPosition(2, 0);
+			la_lcdPuts(list_contents[state_list]+state_list_rl_offset);
+			la_lcdPosition(2, 1);
+			if(list_length > 1)
+			{
+				la_lcdPuts(list_contents[(state_list+1)%list_length]);
+			}
+		}
+		else
+		{
+			la_lcdPosition(0, old_state_list%2);
+			la_lcdPutChar(' ');
+			la_lcdPosition(0, state_list%2);
+			la_lcdPutChar('>');
+		}
 	}
 }
 
@@ -1250,7 +1477,8 @@ print_settings()
 	do_wifi_status();
 }
 
-static int do_list_directory(struct mpd_connection* conn)
+static int
+do_list_directory(struct mpd_connection* conn)
 {
 	state_list_path = strdup(list_contents[state_list]);
 	if(state_list_path == NULL)
@@ -1275,6 +1503,7 @@ do_menu(Control ctrl, struct mpd_connection* conn)
 		CHECK_CONNECTION(conn);
 		mpd_run_noidle(conn);
 		CHECK_CONNECTION(conn);
+		printf("D: do_menu => status\n");
 		print_status(conn);
 		if(!mpd_send_idle(conn))
 		{
@@ -1287,25 +1516,25 @@ do_menu(Control ctrl, struct mpd_connection* conn)
 		{
 			state = LA_STATE_MENU;
 			state_menu = 0;
-			print_menu();
+			print_menu(-1);
 		}
 		else
 		{
-			if(fetch_and_print_list(conn, NULL) == -1)
+			if(fetch_list(conn, NULL) == -1)
 			{
 				return -1;
 			}
 			if(state_list_dir_index < list_length)
 			{
 				state_list = state_list_dir_index;
-				print_list();
-				return 0;
 			}
+			print_list(-1);
+			return 0;
 		}
 	default:
 		state = LA_STATE_MENU;
 		state_menu = 0;
-		print_menu();
+		print_menu(-1);
 		break;
 	}
 	return 0;
@@ -1314,10 +1543,13 @@ do_menu(Control ctrl, struct mpd_connection* conn)
 static int
 do_up(Control ctrl, struct mpd_connection* conn)
 {
+	int old_state_menu, old_state_list;
+
 	switch(state)
 	{
 
 	case LA_STATE_MENU:
+		old_state_menu = state_menu;
 		if(state_menu == 0)
 		{
 			state_menu = MENU_LENGTH - 1;
@@ -1326,7 +1558,7 @@ do_up(Control ctrl, struct mpd_connection* conn)
 		{
 			state_menu--;
 		}
-		print_menu();
+		print_menu(old_state_menu);
 		break;
 
 	case LA_STATE_PLAYING:
@@ -1335,6 +1567,8 @@ do_up(Control ctrl, struct mpd_connection* conn)
 
 	case LA_STATE_LIST:
 	case LA_STATE_RADIO:
+	case LA_STATE_RESUME:
+		old_state_list = state_list;
 		if(state_list == 0)
 		{
 			state_list = list_length - 1;
@@ -1343,7 +1577,7 @@ do_up(Control ctrl, struct mpd_connection* conn)
 		{
 			state_list--;
 		}
-		print_list();
+		print_list(old_state_list);
 		break;
 
 	case LA_STATE_ADD_REPLACE:
@@ -1355,7 +1589,7 @@ do_up(Control ctrl, struct mpd_connection* conn)
 		{
 			state_add_replace = 0;
 		}
-		print_add_replace();
+		print_add_replace(false);
 		break;
 
 	case LA_STATE_VOLUME:
@@ -1370,19 +1604,24 @@ do_up(Control ctrl, struct mpd_connection* conn)
 static int
 do_down(Control ctrl, struct mpd_connection* conn)
 {
+	int old_state_menu, old_state_list;
+
 	switch(state)
 	{
 	case LA_STATE_MENU:
+		old_state_menu = state_menu;
 		state_menu = (state_menu + 1) % MENU_LENGTH;
-		print_menu();
+		print_menu(old_state_menu);
 		break;
 	case LA_STATE_PLAYING:
 		jump_forward(conn);
 		break;
 	case LA_STATE_LIST:
 	case LA_STATE_RADIO:
+	case LA_STATE_RESUME:
+		old_state_list = state_list;
 		state_list = (state_list + 1) % list_length;
-		print_list();
+		print_list(old_state_list);
 		break;
 	case LA_STATE_ADD_REPLACE:
 		state_add_replace = (state_add_replace + 1) % ADD_REPLACE_LENGTH;
@@ -1406,24 +1645,22 @@ do_left(Control ctrl, struct mpd_connection* conn)
 	{
 	case LA_STATE_LIST:
 	case LA_STATE_RADIO:
+	case LA_STATE_RESUME:
 		len = strlen(list_contents[state_list]);
-		if(state_list_rl_offset > 14)
+		if(state_list_rl_offset > 10)
 		{
 			state_list_rl_offset -= 10;
 		}
 		else if(state_list_rl_offset > 0)
 		{
-			state_list_rl_offset--;
+			state_list_rl_offset = 0;
 		}
 		else
 		{
-			state_list_rl_offset = len - 16;
-			if(state_list_rl_offset < 0){
-				state_list_rl_offset = 0;
-			}
+			state_list_rl_offset = len - (len % 10);
 		}
 
-		print_list();
+		print_list(-2);
 		break;
 
 	case LA_STATE_VOLUME:
@@ -1444,21 +1681,18 @@ do_right(Control ctrl, struct mpd_connection* conn)
 	{
 	case LA_STATE_LIST:
 	case LA_STATE_RADIO:
+	case LA_STATE_RESUME:
 		len = strlen(list_contents[state_list]);
-		if(state_list_rl_offset < len - 28)
+		if(state_list_rl_offset < len - 10)
 		{
 			state_list_rl_offset += 10;
-		}
-		else if(state_list_rl_offset < len - 14)
-		{
-			state_list_rl_offset++;
 		}
 		else
 		{
 			state_list_rl_offset = 0;
 		}
 
-		print_list();
+		print_list(-2);
 		break;
 
 	case LA_STATE_VOLUME:
@@ -1480,7 +1714,7 @@ do_ok(Control ctrl, struct mpd_connection* conn)
 		switch(state_menu)
 		{
 		case 0:
-			state = LA_STATE_LIST;
+			state = LA_STATE_RESUME;
 			return fetch_and_print_resume(conn);
 		case 1:
 			state = LA_STATE_LIST;
@@ -1520,6 +1754,9 @@ do_ok(Control ctrl, struct mpd_connection* conn)
 
 	case LA_STATE_ADD_REPLACE:
 		return do_replace_playing_with_selected(conn, state_add_replace == 0);
+
+	case LA_STATE_RESUME:
+		return do_resume_selected(conn);
 
 	default:
 		return -1;
@@ -1721,6 +1958,7 @@ run()
 
 	mpd_fd = mpd_async_get_fd(mpd_connection_get_async(conn));
 
+	printf("D: run => status\n");
 	print_status(conn);
 
 	la_on_key(LA_PLAYPAUSE, (Callback)do_playpause, conn);

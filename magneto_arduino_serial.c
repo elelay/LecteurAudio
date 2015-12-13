@@ -123,7 +123,7 @@ int la_init_ecran()
 {
 	setlocale (LC_ALL, "");
 
-	conv = iconv_open("ISO-8859-1", "UTF-8");
+	conv = iconv_open("ISO-8859-1//TRANSLIT", "UTF-8");
 	if(conv == (iconv_t)(-1))
 	{
 		fprintf(stderr, "E: iconv init failed: %s\n", strerror(errno));
