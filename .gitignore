@@ -1,4 +1,6 @@
 *~
 la
+leds_on_off
+sb
 *.o
 grind.log
