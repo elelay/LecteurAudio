@@ -1043,19 +1043,126 @@ fetch_and_print_resume(struct mpd_connection *conn)
 }
 
 static int
+print_current_time(unsigned int played, unsigned int total)
+{
+	int ret;
+	int len;
+	char* buf;
+
+	la_lcdPosition(0, 1);
+
+	len = 15;
+	buf = malloc(len);
+
+	if(buf == NULL)
+	{
+		perror("print_current_time allocate buf");
+		return -1;
+	}
+	
+	if(total > 3600)
+	{
+		ret = snprintf(buf, len, "%i:%02i:%02i/%i:%02i:%02i ",
+					played / 3600, (played % 3600) / 60, played % 60,
+					total / 3600, (total % 3600) / 60, total % 60);
+	}
+	else
+	{
+		ret = snprintf(buf, len, "%02i:%02i/%02i:%02i    ",
+					played / 60, played % 60,
+					total /  60, total % 60);		
+	}
+	
+	if(ret > 0)
+	{
+		la_lcdPuts(buf);
+	}
+
+	free(buf);
+	return -1;
+}
+
+#define JUMP_SECS 60
+static int
+jump_backward_forward(struct mpd_connection* conn, bool backward)
+{
+	struct mpd_status *status;
+	unsigned int current, total;
+
+	CHECK_CONNECTION(conn);
+	mpd_run_noidle(conn);
+	
+	status = mpd_run_status(conn);
+	if (!status) {
+		LOG_ERROR("%s", mpd_connection_get_error_message(conn));
+		return -1;
+	}
+	
+	current = mpd_status_get_elapsed_time(status);
+	total  = mpd_status_get_total_time(status);
+
+	mpd_status_free(status);
+
+	mpd_response_finish(conn);
+	CHECK_CONNECTION(conn);
+
+	if(backward)
+	{
+		if(current > JUMP_SECS)
+		{
+			current = current - JUMP_SECS;
+		}
+		else
+		{
+			current = 0;
+		}
+	}
+	else
+	{
+		if(current + JUMP_SECS < total)
+		{
+			current = current + JUMP_SECS;
+		}
+		else
+		{
+			current = total;
+		}
+	}
+	if(!mpd_run_seek_pos(conn, 0, current))
+	{
+		LOG_ERROR("jump_backward %s", mpd_connection_get_error_message(conn));
+		return -1;
+	}
+
+	print_current_time(current, total);
+	
+	if(do_update_played(conn))
+	{
+		LOG_ERROR("jump_backward %s", "do_update_played");
+		return -1;
+	}
+	
+	ignore_next_idle = true;
+	if(!mpd_send_idle(conn))
+	{
+		LOG_ERROR("Unable to put mpd in idle mode%s\n","");
+		return -1;
+	}
+
+	return 0;
+}
+
+static int
 jump_backward(struct mpd_connection* conn)
 {
-	LOG_ERROR("TODO: %s","jump_backward");
-	return 0;
+	return jump_backward_forward(conn, true);
 }
 
 static int
 jump_forward(struct mpd_connection* conn)
 {
-	LOG_ERROR("TODO: %s","jump_forward");
-	return 0;
+	return jump_backward_forward(conn, false);
 }
-
 
 static void
 sigrt_handler(int sig, siginfo_t *si, void *uc)
