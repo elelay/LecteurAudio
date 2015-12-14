@@ -491,17 +491,35 @@ do_update_played(struct mpd_connection *conn)
 	struct mpd_song *song;
 	const char *value;
 	char* tmp;
-	char* uri;
+	char* uri;                     
 	int played;
+	bool previous;
 
 	uri = NULL;
+	previous = false;
 
 	song = mpd_run_current_song(conn);
 	if (song == NULL)
 	{
 		printf("D: do_update_played no current song\n");
+		mpd_response_finish(conn);
+		song = mpd_run_get_queue_song_pos(conn, 0);
+		previous = true;
+		
+		if(song == NULL)
+		{
+			printf("D: do_update_played no previous song\n");
+			mpd_response_finish(conn);
+			CHECK_CONNECTION(conn);
+		}
+		else
+		{
+			played = mpd_song_get_duration(song);
+		}
 	}
-	else
+	
+	
+	if(song != NULL)
 	{
 		if((value = mpd_song_get_uri(song)) != NULL)
 		{
@@ -512,21 +530,24 @@ do_update_played(struct mpd_connection *conn)
 		}
 
 		mpd_song_free(song);
+		mpd_response_finish(conn);
 	}
 
-	mpd_response_finish(conn);
+	if(!previous)
+	{
+		status = mpd_run_status(conn);
+		if (!status) {
+			LOG_ERROR("%s", mpd_connection_get_error_message(conn));
+			return -1;
+		}
 
-	status = mpd_run_status(conn);
-	if (!status) {
-		LOG_ERROR("%s", mpd_connection_get_error_message(conn));
-		return -1;
+		played = mpd_status_get_elapsed_time(status);
+		mpd_status_free(status);
+	
+		mpd_response_finish(conn);
+		CHECK_CONNECTION(conn);
 	}
 
-	played = mpd_status_get_elapsed_time(status);
-	mpd_status_free(status);
-
-	mpd_response_finish(conn);
-	CHECK_CONNECTION(conn);
 
 	if(uri)
 	{
@@ -1360,6 +1381,8 @@ static void wait_input_async(struct mpd_connection* conn, int mpd_fd, int* contr
 						{
 							printf("D: recv_idle => status\n");
 							print_status(conn);
+							do_update_played(conn);
+							ignore_next_idle = true; // do_update_played triggers idle ?
 						}
 					}
 					if(!mpd_send_idle(conn))
