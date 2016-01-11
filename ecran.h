@@ -12,6 +12,7 @@ void la_lcdPosition(int col, int row);
 void la_lcdPutChar(uint8_t c);
 void la_lcdPuts(char* str);
 void la_ecran_change_state(bool sleep);
+void la_ecran_show_off();
 
 //void la_lcdPrintf(char* msg, ...);
 

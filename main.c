@@ -1910,6 +1910,7 @@ do_shutdown(struct mpd_connection* conn)
 	la_lcdClear();
 	la_lcdHome();
 	la_lcdPuts("A Bientot...");
+	la_ecran_show_off();
 
 	child_pid = fork();
 	if(child_pid == 0) {

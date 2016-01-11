@@ -323,3 +323,12 @@ int la_control_input_one(int fd)
 void la_exit()
 {
 }
+
+
+void la_ecran_show_off()
+{
+	fprintf(stdout,"D: sending PF\n");
+	serialPuts(fdsArduino[0], "PF\n");
+	sent_cmds++;
+	waitAck();
+}
