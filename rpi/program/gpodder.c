@@ -382,7 +382,7 @@ int get_en_cours(EnCours** res, size_t* res_count)
 {
 	int ret;
 	char* events_str;
-	const char* user = "elelay";
+	const char* user = getenv("GPODDER_USER");
 	const char* password = getenv("GPODDER_PASSWORD");
 	long timestamp = 1445824406L;
 	

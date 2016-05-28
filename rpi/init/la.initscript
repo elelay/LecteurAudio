@@ -21,7 +21,7 @@
 PATH=/sbin:/usr/sbin:/bin:/usr/bin
 DESC="LecteurAudio"
 NAME=la
-DAEMON=/home/pi/LecteurAudio/$NAME
+DAEMON=/home/pi/LecteurAudio/rpi/program/$NAME
 DAEMON_ARGS="-b"
 PIDFILE=/var/run/$NAME.pid
 SCRIPTNAME=/etc/init.d/$NAME

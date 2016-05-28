@@ -1,0 +1,27 @@
+deps:
+
+ sudo apt-get install apt-transport-https
+
+ sudo aptitude install  libcurl4-openssl-dev
+
+ wiringPi
+ ./build
+ 
+ 
+ mpdclient 2.10
+  curl -o /tmp/mpdclient.tar.xz http://www.musicpd.org/download/libmpdclient/2/libmpdclient-2.10.tar.xz
+  tar xf /tmp/mpdclient.tar.xz
+  sudo aptitude install doxygen
+  ./configure --prefix /opt/libmpdclient210
+
+ mpd 0.19.4
+ http://www.musicpd.org/download/mpd/0.19/mpd-0.19.14.tar.xz
+ sudo aptitude install libboost-dev
+ sudo aptitude install libicu-dev
+ sudo aptitude install libglib2.0-dev
+ sudo aptitude install libasound-dev libsystemd-daemon-dev \
+                       libavahi-client-dev libsqlite3-dev \
+                       libmad0-dev libvorbis-dev libfaad-dev \
+                       libopus-dev libflac-dev libid3tag0-dev \
+                       
+
