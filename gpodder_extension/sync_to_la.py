@@ -370,14 +370,21 @@ class gPodderExtension:
         self.window = b.get_object("syncWindow")
         self.window.set_position(gtk.WIN_POS_CENTER_ON_PARENT)
         self.window.set_transient_for(self.gpodder.main_window)
-        if self.gpodder_config.ui.gtk.state.sync_la_window is None:
-            self.gpodder_config.ui.gtk.state.sync_la_window = {
-                'width': 700,
-                'height': 500,
-                'x': -1, 'y': -1,
-                'maximized': False
+        self.gpodder_config.register_defaults({
+            'ui': {
+                'gtk': {
+                    'state': {
+                        'sync_to_la_window':  {
+                            'width': 700,
+                            'height': 500,
+                            'x': -1, 'y': -1,
+                            'maximized': False
+                        }
+                    }
+                }
             }
-        self.gpodder_config.connect_gtk_window(self.window, 'sync_la_window', True)
+        })
+        self.gpodder_config.connect_gtk_window(self.window, 'sync_to_la_window', True)
 
         status_icon = b.get_object("syncWindowsStatusImage")
         status_label = b.get_object("syncWindowStatusLabel")
