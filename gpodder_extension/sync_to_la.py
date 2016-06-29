@@ -38,7 +38,7 @@ DefaultConfig = {
     'host': "192.168.1.15",                     # LecteurAudio Host name
     'port': 6600,                               # LecteurAudio MPD server port
     'rsync_user': 'pi',                         # LecteurAudio rsync user
-    'rsync_root_folder': '/var/lib/mpd/music/', # LecteurAudio rsync root
+    'rsync_root_folder': '/var/lib/mpd/music/Podcasts/', # LecteurAudio rsync root
 }
 
 class MPDProxy:
