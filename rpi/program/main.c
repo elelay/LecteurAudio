@@ -742,7 +742,7 @@ fetch_list(struct mpd_connection *conn, char* path)
 
 	if(path == NULL)
 	{
-		mpd_send_list_meta(conn, "/");
+		mpd_send_list_meta(conn, "Podcasts");
 	}
 	else
 	{
@@ -755,57 +755,44 @@ fetch_list(struct mpd_connection *conn, char* path)
 	tmp_len = 0;
 	while((entity = mpd_recv_entity(conn)) != NULL)
 	{
-		if(path == NULL)
+		if(mpd_entity_get_type(entity)  ==  MPD_ENTITY_TYPE_DIRECTORY)
 		{
-			if(mpd_entity_get_type(entity)  ==  MPD_ENTITY_TYPE_DIRECTORY)
-			{
-				dir = mpd_entity_get_directory(entity);
-				value = strdup(mpd_directory_get_path(dir));
-				if (cur == NULL)
-				{
-					buf = tmp = mk_string_list();
-					tmp->value = value;
-				}
-				else
-				{
-					tmp = mk_string_list();
-					tmp->value = value;
-					cur->next = tmp;
-				}
-				cur = tmp;
-				tmp_len++;
-			}
+			dir = mpd_entity_get_directory(entity);
+			uri = strdup(mpd_directory_get_path(dir));
+			value = strdup(mpd_directory_get_path(dir) + 9); // remove "Podcasts/"
+		}
+		else if(mpd_entity_get_type(entity)  ==  MPD_ENTITY_TYPE_SONG)
+		{
+			song = mpd_entity_get_song(entity);
+			uri = strdup(mpd_song_get_uri(song));
+			value = la_mpd_song_get_filename(song);
 		}
 		else
 		{
-			if(mpd_entity_get_type(entity)  ==  MPD_ENTITY_TYPE_SONG)
-			{
-				song = mpd_entity_get_song(entity);
-				uri = strdup(mpd_song_get_uri(song));
-				value = la_mpd_song_get_filename(song);
-				if (cur == NULL)
-				{
-					buf = tmp = mk_string_list();
-					tmp->value = value;
-
-					fns = tmp_fns = mk_string_list();
-					tmp_fns->value = uri;
-				}
-				else
-				{
-					tmp = mk_string_list();
-					tmp->value = value;
-					cur->next = tmp;
-
-					tmp_fns = mk_string_list();
-					tmp_fns->value = uri;
-					cur_fns->next = tmp_fns;
-				}
-				cur = tmp;
-				cur_fns = tmp_fns;
-				tmp_len++;
-			}
+			continue;
 		}
+
+		if (cur == NULL)
+		{
+			buf = tmp = mk_string_list();
+			tmp->value = value;
+
+			fns = tmp_fns = mk_string_list();
+			tmp_fns->value = uri;
+		}
+		else
+		{
+			tmp = mk_string_list();
+			tmp->value = value;
+			cur->next = tmp;
+
+			tmp_fns = mk_string_list();
+			tmp_fns->value = uri;
+			cur_fns->next = tmp_fns;
+		}
+		cur = tmp;
+		cur_fns = tmp_fns;
+		tmp_len++;
 
 		mpd_entity_free(entity);
 	}
@@ -833,17 +820,14 @@ fetch_list(struct mpd_connection *conn, char* path)
 	}
 	list_length = tmp_len;
 
-	if(path != NULL)
+	list_uris = calloc(tmp_len, sizeof(char*));
+	cur = fns;
+	for(tmpl = list_uris; cur != NULL; tmpl++)
 	{
-		list_uris = calloc(tmp_len, sizeof(char*));
-		cur = fns;
-		for(tmpl = list_uris; cur != NULL; tmpl++)
-		{
-			*tmpl = cur->value;
-			tmp = cur;
-			cur = cur->next;
-			free(tmp);
-		}
+		*tmpl = cur->value;
+		tmp = cur;
+		cur = cur->next;
+		free(tmp);
 	}
 
 	state_list = 0;
@@ -1610,7 +1594,7 @@ print_settings()
 static int
 do_list_directory(struct mpd_connection* conn)
 {
-	state_list_path = strdup(list_contents[state_list]);
+	state_list_path = strdup(list_uris[state_list]);
 	if(state_list_path == NULL)
 	{
 		LOG_ERROR("%s", "Out of memory");
