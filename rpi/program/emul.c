@@ -166,6 +166,12 @@ _la_control_input_one()
 	return 0;
 }
 
-void la_ecran_change_state(bool sleep) {
+void la_ecran_change_state(bool sleep)
+{
 	//NOOP
+}
+
+void la_ecran_show_off()
+{
+	printf("Bye Bye\n");
 }
