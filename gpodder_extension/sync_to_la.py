@@ -39,6 +39,7 @@ DefaultConfig = {
     'port': 6600,                               # LecteurAudio MPD server port
     'rsync_user': 'pi',                         # LecteurAudio rsync user
     'rsync_root_folder': '/var/lib/mpd/music/Podcasts/', # LecteurAudio rsync root
+    'mpd_prefix': 'Podcasts' # LecteurAudio mpd music subfolder for podcasts
 }
 
 class MPDProxy:
@@ -173,13 +174,15 @@ class SyncToLa:
 
         ret = []
         for s in stickers:
-            (dir,filename) = s['file'].split("/")
-            played = int(s['sticker'].split("=")[1])
-            episode = episode_by_dir_filename(self.channels, dir, filename)
-            if episode is None:
-                self.logger.debug("Not found episode %s" % s['file'])
-            else:
-                self.logger.debug("Found matching episode: %i %i" % (episode.id,played))
+            if s['file'].startswith(self.config.mpd_prefix + "/"):
+                f = s['file'][len(self.config.mpd_prefix + "/"):]
+                (dir,filename) = f.split("/")
+                played = int(s['sticker'].split("=")[1])
+                episode = episode_by_dir_filename(self.channels, dir, filename)
+                if episode is None:
+                    self.logger.debug("Not found episode %s" % s['file'])
+                else:
+                    self.logger.debug("Found matching episode: %i %i" % (episode.id,played))
                 ret.append( (episode,played) )
         return ret
 
@@ -220,7 +223,8 @@ class SyncToLa:
         """Write sticker to mpd for each played_episode"""
         self.logger.set_status("gtk-go-up", "Setting played on Device")
         for episode in played_episodes:
-            uri = "%s/%s" % (
+            uri = "%s/%s/%s" % (
+                    self.config.mpd_prefix,
                     episode.channel.download_folder,
                     episode.download_filename)
             self.logger.debug( "played %s" % uri )
@@ -245,7 +249,7 @@ class SyncToLa:
             for e in episodes:
                 file = e.local_filename(create=False)
                 folder = e.channel.download_folder
-                uri = folder + "/" + e.download_filename
+                uri = self.config.mpd_prefix + "/" + folder + "/" + e.download_filename
                 exists = self.client.find("file", uri)
                 if exists:
                     self.logger.info("Episode %s already on LecteurAudio, no need to rsync" % uri)
