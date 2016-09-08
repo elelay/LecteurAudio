@@ -257,7 +257,7 @@ class SyncToLa:
                     cmd = [ "rsync", "-vtus", "--progress", "--partial", file, self._rsync_dest() + folder + "/" ]
                     return run_and_update(cmd)
         else:
-            cmd = [ "rsync", "-rPvtus", "--delete", gpodder.downloads + "/", self._rsync_dest() ]
+            cmd = [ "rsync", "-rPvtus", "--delete", "--exclude", "*.partial", gpodder.downloads + "/", self._rsync_dest() ]
             return run_and_update(cmd)
 
     def _rsync_dest(self):
