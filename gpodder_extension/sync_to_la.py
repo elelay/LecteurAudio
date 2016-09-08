@@ -209,7 +209,7 @@ class SyncToLa:
         self.logger.set_status("gtk-go-down", "Saving played on Device")
         now = time.time()
         for (episode, played) in played_on_device:
-            if played > episode.current_position:
+            if episode is not None and played > episode.current_position:
                 self.logger.debug("played on device: %i > %i" % (played, episode.current_position))
                 start = episode.current_position
                 episode.current_position = played
