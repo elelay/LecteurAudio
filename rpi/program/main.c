@@ -82,14 +82,16 @@ int state_list_rl_offset;
 int* resume_played;
 bool ignore_next_idle;
 
-#define LIST_RADIOS_LEN 2
+#define LIST_RADIOS_LEN 3
 const char* list_radios[LIST_RADIOS_LEN] = {
 	"France Inter",
-	"Radio Rennes"
+	"Radio Rennes",
+	"Canal B"
 };
 const char* list_radios_uris[LIST_RADIOS_LEN] = {
-	"http://audio.scdn.arkena.com/11008/franceinter-midfi128.mp3",
-	"http://sv2.vestaradio.com:5750/;stream.mp3"
+	"http://direct.franceinter.fr/live/franceinter-midfi.mp3",
+	"http://sv2.vestaradio.com:5750/;stream.mp3",
+	"http://stream.levillage.org/canalb?1362308951917.mp3"
 };
 
 int state_add_replace;
