@@ -27,8 +27,8 @@ static char* buf;
 static size_t buf_len;
 
 static iconv_t conv;
-static const size_t conv_buf_len = 64;
-static char conv_buf[64];
+static const size_t conv_buf_len = 128;
+static char conv_buf[128];
 static int saved_x = 0, saved_y = 0;
 static int sent_cmds = 0;
 
@@ -182,6 +182,16 @@ static void tr(char* str)
 	{
 		switch(str[i])
 		{
+			case (char)192:
+			case (char)193:
+			case (char)194:
+			case (char)195:
+			case (char)196:
+			case (char)197:
+			case (char)198:
+				str[i] = 'A';
+				break;
+
 			case (char)224:
 			case (char)225:
 			case (char)226:
