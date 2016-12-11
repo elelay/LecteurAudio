@@ -55,6 +55,7 @@ typedef enum {
 	LA_STATE_PLAYING, LA_STATE_MENU, LA_STATE_RESUME, LA_STATE_LIST, LA_STATE_ADD_REPLACE, LA_STATE_VOLUME, LA_STATE_SETTINGS, LA_STATE_RADIO
 } LaState;
 
+static int print_current_time(unsigned int played, unsigned int total);
 static void print_list(int old_state_list);
 static void print_settings();
 static int do_shutdown(struct mpd_connection *conn);
@@ -404,8 +405,22 @@ print_status(struct mpd_connection *conn)
 	struct mpd_song *song;
 	char *value;
 	char* tmp;
+	enum mpd_state mpdstate;
+	unsigned int current, total;
 
 	la_lcdClear();
+
+	status = mpd_run_status(conn);
+	if (!status) {
+		LOG_ERROR("%s", mpd_connection_get_error_message(conn));
+		return -1;
+	}
+	mpdstate = mpd_status_get_state(status);
+	current = mpd_status_get_elapsed_time(status);
+	total  = mpd_status_get_total_time(status);
+	mpd_status_free(status);
+	mpd_response_finish(conn);
+
 
 	song = mpd_run_current_song(conn);
 	if (song != NULL) {
@@ -429,48 +444,44 @@ print_status(struct mpd_connection *conn)
 		la_lcdPosition(0,0);
 		la_lcdPuts(value);
 
-		if((value = (char*)mpd_song_get_tag(song, MPD_TAG_ARTIST, 0)) == NULL)
+		if(mpdstate != MPD_STATE_PAUSE)
 		{
-			if((value = (char*)mpd_song_get_uri(song)) == NULL)
+			if((value = (char*)mpd_song_get_tag(song, MPD_TAG_ARTIST, 0)) == NULL)
 			{
-				value = "<NO URI>";
-			}
-			else
-			{
-				tmp = strrchr(value, '/');
-				if(tmp == NULL)
+				if((value = (char*)mpd_song_get_uri(song)) == NULL)
 				{
-					value = "<NO DIR>";
+					value = "<NO URI>";
 				}
 				else
 				{
-					*tmp='\0';
 					tmp = strrchr(value, '/');
-					if(tmp != NULL)
+					if(tmp == NULL)
 					{
-						value = tmp+1;
+						value = "<NO DIR>";
+					}
+					else
+					{
+						*tmp='\0';
+						tmp = strrchr(value, '/');
+						if(tmp != NULL)
+						{
+							value = tmp+1;
+						}
 					}
 				}
 			}
+	
+			la_lcdPosition(0,1);
+			la_lcdPuts(value);
 		}
-
-		la_lcdPosition(0,1);
-		la_lcdPuts(value);
-
 
 		mpd_song_free(song);
 	}
 
 	mpd_response_finish(conn);
 
-	status = mpd_run_status(conn);
-	if (!status) {
-		LOG_ERROR("%s", mpd_connection_get_error_message(conn));
-		return -1;
-	}
-
 	la_lcdPosition(15, 1);
-	switch (mpd_status_get_state(status)){
+	switch (mpdstate){
 	case MPD_STATE_STOP:
 		la_lcdPutChar('X');
 		break;
@@ -478,15 +489,14 @@ print_status(struct mpd_connection *conn)
 		la_lcdPutChar('P');
 		break;
 	case MPD_STATE_PAUSE:
+		print_current_time(current, total);
+		la_lcdPosition(15, 1);
 		la_lcdPutChar('=');
 		break;
 	default:
 		la_lcdPutChar('?');
 		break;
 	}
-	mpd_status_free(status);
-
-	mpd_response_finish(conn);
 	CHECK_CONNECTION(conn);
 
 	return 0;
