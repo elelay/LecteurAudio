@@ -65,6 +65,7 @@ static void free_list_state();
 static int reconnect_to_mpd(struct mpd_connection **conn);
 static int do_update_played(struct mpd_connection *conn);
 static int do_play(struct mpd_connection* conn);
+static int do_radio(Control control, struct mpd_connection* conn);
 
 
 LaState state;
@@ -202,10 +203,8 @@ do_clear_current(struct mpd_connection* conn)
 }
 
 static int
-do_replace_playing_with_selected(struct mpd_connection* conn, bool replace)
+do_replace_playing_with_uri(struct mpd_connection* conn, bool replace, const char* file)
 {
-	char* file = list_uris[state_list];
-
 	printf("D: switch to %s\n", file);
 
 	CHECK_CONNECTION(conn);
@@ -238,6 +237,13 @@ do_replace_playing_with_selected(struct mpd_connection* conn, bool replace)
 	}
 
 	return 0;
+}
+
+static int
+do_replace_playing_with_selected(struct mpd_connection* conn, bool replace)
+{
+	char* file = list_uris[state_list];
+	return do_replace_playing_with_uri(conn, replace, file);
 }
 
 static int
@@ -2046,6 +2052,45 @@ do_wifi_status()
 	return 0;
 }
 
+
+static int
+do_radio(Control control, struct mpd_connection* conn)
+{
+	int radio;
+	switch(control)
+	{
+		case LA_RADIO_INTER:
+			radio = 0;
+			break;
+		case LA_RADIO_RENNES:
+			radio = 1;
+			break;
+		case LA_RADIO_CANALB:
+			radio = 2;
+			break;
+		default:
+			radio = 0;
+	}
+	return do_replace_playing_with_uri(conn,
+	                                   true,
+	                                   list_radios_uris[radio]);
+}
+
+
+static int
+do_predefined_podcast(Control control, struct mpd_connection* conn)
+{
+	if(control == LA_PODCAST_DEGUSTER)
+	{
+		state = LA_STATE_LIST;
+		return fetch_and_print_list(conn,
+			"Podcasts/On va déguster");
+	}
+
+	printf("E: Invalid control for do_predefined_podcast: %i\n", control);
+	return -1;
+}
+
 int
 run()
 {
@@ -2087,6 +2132,10 @@ run()
 	la_on_key(LA_OK, (Callback)do_ok, conn);
 	la_on_key(LA_STOP, (Callback)do_stop, conn);
 	la_on_key(LA_EXIT, (Callback)do_stop, conn);
+	la_on_key(LA_RADIO_INTER, (Callback)do_radio, conn);
+	la_on_key(LA_RADIO_RENNES, (Callback)do_radio, conn);
+	la_on_key(LA_RADIO_CANALB, (Callback)do_radio, conn);
+	la_on_key(LA_PODCAST_DEGUSTER, (Callback)do_predefined_podcast, conn);
 
 	if(is_stream_in_queue(conn))
 	{

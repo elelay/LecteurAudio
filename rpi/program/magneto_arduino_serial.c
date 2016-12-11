@@ -32,36 +32,6 @@ static char conv_buf[128];
 static int saved_x = 0, saved_y = 0;
 static int sent_cmds = 0;
 
-typedef enum {
-	CODE__1,
-	CODE_POWER,
-	CODE_PLAY,
-	CODE_DOWN,
-	CODE_REW,
-
-	CODE__2,
-	CODE_STOP,
-	CODE_REC,
-	CODE_UP,
-	CODE_FF,
-
-	CODE_LENGTH
-} Code;
-
-static char* DEBUG_CODES[CODE_LENGTH] = {
-	"_1",
-	"POWER",
-	"PLAY",
-	"DOWN",
-	"REW",
-
-	"_2",
-	"STOP",
-	"REC",
-	"UP",
-	"FF",
-};
-
 int la_init_controls(int** fdControls, int* fdControlCount)
 {
 	int ret;
@@ -309,6 +279,10 @@ int la_control_input_one(int fd)
 	{
 		c = LA_DOWN;
 	}
+	else if(!strcmp("ROTATE", cmd))
+	{
+		c = LA_PODCAST_DEGUSTER;
+	}
 	else if(!strcmp("STOP", cmd))
 	{
 		c = LA_STOP;
@@ -316,6 +290,19 @@ int la_control_input_one(int fd)
 	else if(!strcmp("EXIT", cmd))
 	{
 		c = LA_EXIT;
+	}
+	else if(!strcmp("VIDEO", cmd))
+	{
+		printf("VIDEOE\n");
+		c = LA_RADIO_INTER;
+	}
+	else if(!strcmp("ZOOM", cmd))
+	{
+		c = LA_RADIO_RENNES;
+	}
+	else if(!strcmp("VOL-", cmd))
+	{
+		c = LA_RADIO_CANALB;
 	}
 	else
 	{
