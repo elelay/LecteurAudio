@@ -35,7 +35,7 @@ import mpd
 
 
 DefaultConfig = {
-    'host': "192.168.1.15",                     # LecteurAudio Host name
+    'host': "10.147.17.86",                     # LecteurAudio Host name
     'port': 6600,                               # LecteurAudio MPD server port
     'rsync_user': 'pi',                         # LecteurAudio rsync user
     'rsync_root_folder': '/var/lib/mpd/music/Podcasts/', # LecteurAudio rsync root
@@ -81,6 +81,7 @@ class SyncToLa:
         self.config = config
         self.logger = logger
         self.client = None
+        self.config.host = '10.147.17.86'
 
     def do_sync(self, episodes=None):
         """Entry point for syncing. give episodes otherwise everything is synced"""
@@ -119,8 +120,8 @@ class SyncToLa:
     def _init_mpd(self):
         """Actual creation of mpd client and connection to device's mpd"""
         try:
-            self.logger.set_status("gtk-network", "Connecting to MPD server")
-            self.client = MPDProxy(self.config.host, self.config.port)
+            self.logger.set_status("gtk-network", "Connecting to MPD server %s:%i" % (self.config.host, self.config.port))
+            self.client = MPDProxy("10.147.17.86", self.config.port)
             self.logger.info("connected to mpd server at %s:%i version %s" % (self.config.host, self.config.port, self.client.mpd_version))
             return True
         except Exception as e:
@@ -228,7 +229,10 @@ class SyncToLa:
                     episode.channel.download_folder,
                     episode.download_filename)
             self.logger.debug( "played %s" % uri )
-            self.client.sticker_set("song", uri, "played", episode.current_position)
+            try:
+                self.client.sticker_set("song", uri, "played", episode.current_position)
+            except:
+                self.logger.error("setting played %s" % uri)
 
     def _rsync_to_device(self, episodes=None):
         """Actual call to rsync for episodes transfer to device.
