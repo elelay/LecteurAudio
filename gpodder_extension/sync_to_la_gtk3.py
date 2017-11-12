@@ -12,7 +12,8 @@ from subprocess import CalledProcessError
 import sys
 import time
 
-import gtk
+from gi.repository import Gio
+from gi.repository import Gtk
 
 import gpodder
 from gpodder import util
@@ -24,18 +25,30 @@ logger = logging.getLogger(__name__)
 
 _ = gpodder.gettext
 
-__title__ = _('Sync to LecteurAudio (gtk2)')
+__title__ = _('Sync to LecteurAudio (gtk3)')
 __description__ = _('synchronize episodes with LecteurAudio')
 __author__ = 'Eric Le Lay <contact@elelay.fr>'
 __category__ = 'interface'
-__only_for__ = 'python2'
+__only_for__ = 'python3'
 
 
 import mpd
 
 
+MenuItem = """
+<interface>
+    <menu id="myMenu">
+      <item>
+        <attribute name="action">win.ext.sync_to_la.sync</attribute>
+        <attribute name="label" translatable="yes">Sync to LecteurAudio</attribute>
+      </item>
+    </menu>
+</interface>
+"""
+
+
 DefaultConfig = {
-    'host': "10.147.17.86",                     # LecteurAudio Host name
+    'host': "192.168.1.10",                     # LecteurAudio Host name
     'port': 6600,                               # LecteurAudio MPD server port
     'rsync_user': 'pi',                         # LecteurAudio rsync user
     'rsync_root_folder': '/var/lib/mpd/music/Podcasts/', # LecteurAudio rsync root
@@ -120,7 +133,7 @@ class SyncToLa:
         """Actual creation of mpd client and connection to device's mpd"""
         try:
             self.logger.set_status("gtk-network", "Connecting to MPD server %s:%i" % (self.config.host, self.config.port))
-            self.client = MPDProxy("10.147.17.86", self.config.port)
+            self.client = MPDProxy(self.config.host, self.config.port)
             self.logger.info("connected to mpd server at %s:%i version %s" % (self.config.host, self.config.port, self.client.mpd_version))
             return True
         except Exception as e:
@@ -149,7 +162,7 @@ class SyncToLa:
             universal_newlines=True,
         )
 
-        for line in iter(p.stdout.readline, b''):
+        for line in iter(p.stdout.readline, ''):
             util.idle_add(self.logger._log,"\t"+line.rstrip())
         p.stdout.close()
         status = p.wait()
@@ -260,8 +273,12 @@ class SyncToLa:
                     cmd = [ "rsync", "-vtus", "--progress", "--partial", file, self._rsync_dest() + folder + "/" ]
                     return run_and_update(cmd)
         else:
-            cmd = [ "rsync", "-rPvtus", "--delete", "--exclude", "*.partial", gpodder.downloads + "/", self._rsync_dest() ]
-            return run_and_update(cmd)
+            ret = True
+            for d in os.listdir(gpodder.downloads):
+                if ret:
+                    cmd = [ "rsync", "-rPvtus", "--delete", "--exclude", "*.partial", os.path.join(gpodder.downloads, d) , self._rsync_dest() ]
+                    ret = run_and_update(cmd)
+            return ret
 
     def _rsync_dest(self):
         """Utility: compute target to rsync to based on config"""
@@ -327,6 +344,7 @@ class gPodderExtension:
         self.sync = None
         self.config = self.container.config
         self.window = None
+        self.scrolllock = False
 
     def on_ui_object_available(self, name, ui_object):
         """
@@ -359,8 +377,7 @@ class gPodderExtension:
 
     def _init_ui(self, gpodder):
         """
-        - inject Sync to LecteurAudio menu item
-        - call _init_window()
+        - save gPodder for later
         """
         self.gpodder = gpodder
         self.ui_config = gpodder.config
@@ -370,11 +387,10 @@ class gPodderExtension:
         dirname = os.path.dirname(__file__)
         file_ui = dirname+"/sync_to_la.ui"
         logger.debug("loading ui from %s" % file_ui)
-        b = gtk.Builder()
-        b.add_from_file(file_ui)
+        b = Gtk.Builder.new_from_file(file_ui)
 
         self.window = b.get_object("syncWindow")
-        self.window.set_position(gtk.WIN_POS_CENTER_ON_PARENT)
+        self.window.set_position(Gtk.WindowPosition.CENTER_ON_PARENT)
         self.window.set_transient_for(self.gpodder.main_window)
         self.ui_config.register_defaults({
             'ui': {
@@ -402,6 +418,7 @@ class gPodderExtension:
         log.connect('size-allocate', self.on_status_log_changed)
 
         b.get_object("syncWindowClose").connect("clicked", self.on_sync_close_window)
+        b.get_object("syncWindowLock").connect("clicked", self.on_sync_lock_toggle)
 
         self.g_logger = gLogger(self.notification, self.status_log, status_icon, status_label)
         self.sync = SyncToLa(self.gpodder, self.config, self.g_logger)
@@ -426,10 +443,14 @@ class gPodderExtension:
         """Handler for "Close" button in sync window"""
         self.window.hide()
 
+    def on_sync_lock_toggle(self, toggle):
+        self.scrolllock = toggle.get_active()
+
     def on_status_log_changed(self, _a, _b):
         """Scroll to bottom in sync window log"""
-        adj = self.status_scroll.get_vadjustment()
-        adj.set_value( adj.upper - adj.page_size )
+        if not self.scrolllock:
+            adj = self.status_scroll.get_vadjustment()
+            adj.set_value( adj.get_upper() - adj.get_page_size() )
 
     def notification(self, message, title):
         """Wrapper for main.py's GTK notification"""
