@@ -52,6 +52,7 @@ DefaultConfig = {
     'port': 6600,                               # LecteurAudio MPD server port
     'rsync_user': 'pi',                         # LecteurAudio rsync user
     'rsync_root_folder': '/var/lib/mpd/music/Podcasts/', # LecteurAudio rsync root
+    'rsync_program': 'rsync', # rsync executable to use (MacPorts one on macOS)
     'mpd_prefix': 'Podcasts' # LecteurAudio mpd music subfolder for podcasts
 }
 
@@ -270,13 +271,13 @@ class SyncToLa:
                 if exists:
                     self.logger.info("Episode %s already on LecteurAudio, no need to rsync" % uri)
                 else:
-                    cmd = [ "rsync", "-vtus", "--progress", "--partial", file, self._rsync_dest() + folder + "/" ]
+                    cmd = [ self.config.rsync_program, "-vtus", "--progress", "--partial", file, self._rsync_dest() + folder + "/" ]
                     return run_and_update(cmd)
         else:
             ret = True
             for d in os.listdir(gpodder.downloads):
                 if ret:
-                    cmd = [ "rsync", "-rPvtus", "--delete", "--exclude", "*.partial", os.path.join(gpodder.downloads, d) , self._rsync_dest() ]
+                    cmd = [ self.config.rsync_program, "-rPvtus", "--delete", "--exclude", "*.partial", os.path.join(gpodder.downloads, d) , self._rsync_dest() ]
                     ret = run_and_update(cmd)
             return ret
 

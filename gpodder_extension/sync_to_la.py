@@ -39,6 +39,7 @@ DefaultConfig = {
     'port': 6600,                               # LecteurAudio MPD server port
     'rsync_user': 'pi',                         # LecteurAudio rsync user
     'rsync_root_folder': '/var/lib/mpd/music/Podcasts/', # LecteurAudio rsync root
+    'rsync_program': 'rsync', # rsync executable to use (MacPorts one on macOS)
     'mpd_prefix': 'Podcasts' # LecteurAudio mpd music subfolder for podcasts
 }
 
@@ -120,7 +121,7 @@ class SyncToLa:
         """Actual creation of mpd client and connection to device's mpd"""
         try:
             self.logger.set_status("gtk-network", "Connecting to MPD server %s:%i" % (self.config.host, self.config.port))
-            self.client = MPDProxy("10.147.17.86", self.config.port)
+            self.client = MPDProxy(self.config.host, self.config.port)
             self.logger.info("connected to mpd server at %s:%i version %s" % (self.config.host, self.config.port, self.client.mpd_version))
             return True
         except Exception as e:
@@ -257,10 +258,10 @@ class SyncToLa:
                 if exists:
                     self.logger.info("Episode %s already on LecteurAudio, no need to rsync" % uri)
                 else:
-                    cmd = [ "rsync", "-vtus", "--progress", "--partial", file, self._rsync_dest() + folder + "/" ]
+                    cmd = [ self.config.rsync_program, "-vtus", "--progress", "--partial", file, self._rsync_dest() + folder + "/" ]
                     return run_and_update(cmd)
         else:
-            cmd = [ "rsync", "-rPvtus", "--delete", "--exclude", "*.partial", gpodder.downloads + "/", self._rsync_dest() ]
+            cmd = [ self.config.rsync_program, "-rPvtus", "--delete", "--exclude", "*.partial", gpodder.downloads + "/", self._rsync_dest() ]
             return run_and_update(cmd)
 
     def _rsync_dest(self):
